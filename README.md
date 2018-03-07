@@ -9,7 +9,7 @@
 		Here, we test DIR-815_FIRMWARE_1.01.ZIP, a router firmware image based on mipsel cpu arch.
 		Finally, we replace the run.sh in scratch/(num)/ with our modified one.
 
-####TriforceAFL: 
+####TriforceAFL: AFL fuzzing with full-system emulation
 		Run make
   
 ####DECAF: upgraded to the newest qemu version 2.10.1
