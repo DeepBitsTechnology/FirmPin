@@ -1,0 +1,8 @@
+inside bdrv open, drv addr= 0xcd698e0, size= 1073741824
+fs_open = Fragment 
+inside bdrv open, drv addr= 0x806758e0, size= 1073741824
+fs_open = Fragment 
+inside bdrv open, drv addr= 0x54c2d4e0, size= 1073741824
+fs_open = Fragment 
+inside bdrv open, drv addr= 0xfc7cc4e0, size= 1073741824
+fs_open = Fragment 
