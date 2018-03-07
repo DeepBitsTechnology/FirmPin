@@ -10,15 +10,23 @@
 		Finally, we replace the run.sh in scratch/(num)/ with our modified one.
 
 ####TriforceAFL: 
-		run make
+		Run make
   
 ####DECAF: upgraded to the newest qemu version 2.10.1
 		It is included in qemu_mode/qemu dir. 
 		If there is something wrong with sleuthkit, plese comment or not comment the following code.
-		LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
+			LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
 
 		In our case, run ./configure --target-list=mipsel-softmmu
-		run make
+		Run make
+
+####Usage:
+		cd firmadyne
+		Run ./scratch/(num)/run.sh 
+		In another terminal, run 'telnet 127.0.0.1 4444', into qemu monitor console.
+		Load plugin, such as'../qemu_mode/qemu/plugins/callbacktests/callbacktests.so', 'do_callbacktests httpd'
+		When firmware system initialization is completed, open a Browser, type a request in url. like "http://192.168.0.1/hedwig.cgi"
+		Finally, fuzz process is started.
 
 
 
