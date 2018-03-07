@@ -7,7 +7,7 @@
 		cd firmadyne 
 		See README in firmadyne and do as it says.
 		Here, we test DIR-815_FIRMWARE_1.01.ZIP, a router firmware image based on mipsel cpu arch.
-		Finally, we replace the run.sh in scratch/(num)/ with our modified one.
+		Finally, we replace the run.sh in scratch/(num)/ with our modified one (In firmadyne_dev dir).
 
 ####TriforceAFL: AFL fuzzing with full-system emulation
 		Run make
