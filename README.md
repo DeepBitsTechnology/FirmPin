@@ -25,7 +25,8 @@
 		Run ./scratch/(num)/run.sh 
 		In another terminal, run 'telnet 127.0.0.1 4444', into qemu monitor console.
 		Load plugin, such as'../qemu_mode/qemu/plugins/callbacktests/callbacktests.so', 'do_callbacktests httpd'
-		When firmware system initialization is completed, open a Browser, type a request in url. like "http://192.168.0.1/hedwig.cgi"
+		When firmware system initialization is completed, open a Browser, type a request in url. 		
+			like "http://192.168.0.1/hedwig.cgi"
 		Finally, fuzz process is started.
 
 
