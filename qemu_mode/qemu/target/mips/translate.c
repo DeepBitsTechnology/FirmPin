@@ -20327,11 +20327,6 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
 #endif /* AWH */
 
     while (ctx.bstate == BS_NONE) {
-	int count = 0;
-	if(ctx.pc > 0x40a218 && ctx.pc<0x40a2b0){
-		printf("jalr getpid:%x\n", ctx.pc);
-		count = 1;
-	}
         tcg_gen_insn_start(ctx.pc, ctx.hflags & MIPS_HFLAG_BMASK, ctx.btarget);
         num_insns++;
 
@@ -20405,9 +20400,6 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
 #endif /* AWH */
 
         if (is_slot) {
-	    if(count == 1){
-		printf("branch\n");
-	    }
             gen_branch(&ctx, insn_bytes);
         }
         ctx.pc += insn_bytes;
