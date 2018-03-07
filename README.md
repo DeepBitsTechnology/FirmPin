@@ -16,7 +16,6 @@
 		It is included in qemu_mode/qemu dir. 
 		If there is something wrong with sleuthkit, plese comment or not comment the following code in configure.
 			LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
-
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make
 
