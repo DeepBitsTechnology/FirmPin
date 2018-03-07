@@ -1,9 +1,9 @@
 ###TriforceAFL_new
 
-		A tool for simulation, dynamic analsis and fuzz of IoT firmware.
+		A tool for simulation, dynamic analysis and fuzzing of IoT firmware.
 		Combination of TriforceAFL, firmadyne and DECAF.
 
-####Firmadyne: we use its custom kernel and libnvram. 
+####Firmadyne: we use its custom kernel and libnvram to emulate IoT firmware. 
 		cd firmadyne 
 		See README in firmadyne and do as it says.
 		Here, we test DIR-815_FIRMWARE_1.01.ZIP, a router firmware image based on mipsel cpu arch.
