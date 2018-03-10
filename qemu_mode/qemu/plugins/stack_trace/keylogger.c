@@ -51,7 +51,6 @@ uint32_t cr3_stack[MAX_STACK_SIZE];
 uint32_t stack_top = 0;
 void check_call(DECAF_Callback_Params *param)
 {
-	//DECAF_printf("check call\n");
 	CPUState *env=param->be.env;
 	CPUArchState *mips_env = env->env_ptr;
 	if(env == NULL)
@@ -67,32 +66,40 @@ void check_call(DECAF_Callback_Params *param)
 		stack_top = MAX_STACK_SIZE-MAX_STACK_SIZE/10;
 		return;
 	}
-	if(funcmap_get_name_c(pc, cr3, modname_t, func_name_t))
-	{
-		DECAF_read_mem(env,mips_env->active_tc.gpr[28],4,&sys_call_ret_stack[stack_top]);
-		sys_call_entry_stack[stack_top] = pc;
-		cr3_stack[stack_top] = cr3;
-		stack_top++;
 
-	}
+	//DECAF_read_mem(env,mips_env->active_tc.gpr[28],4,&sys_call_ret_stack[stack_top]);
+	sys_call_entry_stack[stack_top] = pc;
+	cr3_stack[stack_top] = cr3;
+	stack_top++;
+
 
 
 
 }
 void check_ret(DECAF_Callback_Params *param)
 {
-	//DECAF_printf("check ret\n");
 	if(!stack_top)
 		return;
-	if(param->be.next_pc == sys_call_ret_stack[stack_top-1])
+	//if(param->be.next_pc == sys_call_ret_stack[stack_top-1])
+	if(param->be.next_pc > 0x70000000 && param->be.next_pc < 0x90000000){
+		//0x409ed4
+		return;
+	}
+	if(param->be.next_pc == sys_call_entry_stack[stack_top-1])
 	{
+		//DECAF_printf("stack:%x\n", param->be.next_pc);
 		stack_top--;
 	}
 	else{
-		DECAF_printf("stack overflow\n");
+		DECAF_printf("stack overflow:%x, %x, %d\n", param->be.next_pc, sys_call_entry_stack[stack_top-1], stack_top - 1);
+		for(int i=0;i< stack_top;i++){
+			DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
+		}
+		exit(32);
 	}
 }
 
+static int main_start = 0;
 void do_block_end_cb(DECAF_Callback_Params *param)
 {
 
@@ -103,17 +110,37 @@ void do_block_end_cb(DECAF_Callback_Params *param)
 	char cur_process[50];
 	int pid;
 	VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
-	if(strcmp(cur_process, "httpd") == 0 && param->be.cur_pc < 0x70000000){
-		DECAF_read_mem(param->be.env,param->be.cur_pc,sizeof(char)*4,insn_buf);
+	if(strcmp(cur_process, "httpd") == 0 && param->be.cur_pc < 0x70000000 && main_start == 1){
+		//DECAF_printf("block end pc: %x\n", param->be.cur_pc);
+		DECAF_read_mem(param->be.env,param->be.cur_pc - 4 ,sizeof(char)*4,insn_buf);
 		if(insn_buf[0] == 9 && (insn_buf[1]&7) == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
-			DECAF_printf("jalr ins:%x\n",param->be.cur_pc);
-			is_call = 1;
+			param->be.next_pc = param->be.cur_pc + 4;
+			int jump_reg = (insn_buf[3] * 8) + (insn_buf[2]/32);
+			int next_reg = insn_buf[1]/8;			
+			
+			int jump_value = ((CPUArchState *)param->be.env->env_ptr)->active_tc.gpr[25];
+			if(next_reg == 31 && jump_value < 0x411910){
+				// 0x42516c extern, 0x411910 mips.stub
+				DECAF_printf("jump value:%x\n", jump_value);
+				DECAF_printf("jalr ins:%x, next pc:%x, jalr reg:%d, jalr next reg:%d\n",param->be.cur_pc, param->be.next_pc, jump_reg, next_reg);
+				is_call = 1;
+			}
 		}else if((insn_buf[3] & 252) == 12){
-			DECAF_printf("jal ins:%x\n",param->be.cur_pc);
+			param->be.next_pc = param->be.cur_pc + 4;
+			DECAF_printf("jal ins:%x, next pc:%x\n",param->be.cur_pc, param->be.next_pc);
 			is_call = 1;
 		}else if((insn_buf[0] & 63) == 8 && insn_buf[1] == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
-			DECAF_printf("jr ins:%x\n",param->be.cur_pc);
-			is_ret = 1;
+			int reg = (insn_buf[3] *8) + (insn_buf[2]/32);
+			
+			if(reg == 31){ 
+				//jr $ra, not jr other(such as jr $t9, jump at the end of function)	
+				DECAF_printf("jr ins:%x, next pc:%x, jr reg:%d\n",param->be.cur_pc, param->be.next_pc, reg);		
+				is_ret = 1;
+			}
+			else if(reg == 25){
+				//jr $ra happens in lib function
+				stack_top --;
+			}	
 		}
 		if (is_call)
 		check_call(param);
@@ -125,19 +152,31 @@ void do_block_end_cb(DECAF_Callback_Params *param)
 
 void do_block_begin_cb(DECAF_Callback_Params *param)
 {
+	
+
 	unsigned char insn_buf[2];
 	int is_call = 0, is_ret = 0;
 	int b;
-	target_ulong pgd = DECAF_getPGD(param->bb.env);
+	target_ulong cr3 = DECAF_getPGD(param->bb.env);
 	char cur_process[50];
 	int pid;
-	VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
+	VMI_find_process_by_cr3_c(cr3, cur_process, 50, &pid);
 	//DECAF_printf("process pid:%d, name:%s\n",pid, cur_process);
+
+	if(strcmp(cur_process, "httpd") == 0){
+		target_ulong pc = param->bb.tb->pc;
+		if(pc == 0x40a218){
+			DECAF_printf("main start\n");
+			main_start = 1;
+		}
 /*
-	if(strcmp(cur_process, "httpd") == 0 && param->bb.tb->pc < 0x70000000){
-		DECAF_printf("begin block:%x\n", param->bb.tb->pc);
+		if(main_start == 1 && funcmap_get_name_c(pc, cr3, modname_t, func_name_t) == 0)
+		{
+			DECAF_printf("function name is :%s, pc:%x\n", func_name_t, pc);
+		}
+*/
 	}
-*/		
+		
 }
 
 void tracing_insn_end(DECAF_Callback_Params *param)
@@ -153,7 +192,7 @@ void tracing_insn_end(DECAF_Callback_Params *param)
 	//DECAF_printf("process pid:%d, name:%s\n",pid, cur_process);
 	CPUState * cpu = param->ie.env;
 	CPUArchState *cpu_env = cpu->env_ptr;
-	if(strcmp(cur_process, "httpd") == 0 ){
+	if(strcmp(cur_process, "httpd") == 0 && cpu_env->current_tc < 0x70000000){
 		DECAF_read_mem(param->ie.env,cpu_env->current_tc,sizeof(char)*4,insn_buf);
 		//DECAF_printf("insn:%x\n",insn_buf[0] & 63);
 		if(insn_buf[0] == 9 && (insn_buf[1]&7) == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){

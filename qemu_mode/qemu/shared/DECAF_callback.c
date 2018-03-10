@@ -859,12 +859,9 @@ POP_ALL()
 
 void helper_DECAF_invoke_block_end_callback(CPUArchState* env_ptr, TranslationBlock* tb, gva_t from)
 {
-
   static callback_struct_t *cb_struct, *cb_temp;
   static DECAF_Callback_Params params;
-
   if (env_ptr == NULL) return;
-
   //zyw CPUArchState switch to CPUState
   MIPSCPU *cpu = mips_env_get_cpu(env_ptr);
   CPUState *cs = CPU(cpu);
@@ -879,7 +876,8 @@ PUSH_ALL()
 #elif defined(TARGET_ARM)
   params.be.next_pc = env_ptr->regs[15];
 #elif defined(TARGET_MIPS)
-  params.be.next_pc = env_ptr->active_tc.PC;
+  //params.be.next_pc = env_ptr->active_tc.PC;
+  params.be.next_pc = env_ptr->active_tc.gpr[31];
 #else
   fix this error
 #endif

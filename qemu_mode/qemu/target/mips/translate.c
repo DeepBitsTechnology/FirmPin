@@ -4323,22 +4323,23 @@ static inline bool use_goto_tb(DisasContext *ctx, target_ulong dest)
 
 static inline void gen_goto_tb(DisasContext *ctx, int n, target_ulong dest)
 {
-    if (use_goto_tb(ctx, dest)) {
 #if 1 /* AWH - callback */
 	TranslationBlock *tb;
 	tb = ctx->tb;
-	if ((tb->pc & TARGET_PAGE_MASK) == (dest & TARGET_PAGE_MASK) && likely(!ctx->singlestep_enabled)) {
-		if(DECAF_is_BlockEndCallback_needed(tb->pc, dest))
-		{
-		  TCGv_ptr tmpTb = tcg_const_ptr((tcg_target_ulong)tb);
-		  TCGv tmpFrom = tcg_temp_new();
-		  tcg_gen_movi_tl(tmpFrom, cur_pc);
-		  gen_helper_DECAF_invoke_block_end_callback(cpu_env, tmpTb, tmpFrom);
-		  tcg_temp_free(tmpFrom);
-		  tcg_temp_free_ptr(tmpTb);
-		}
-        }
+	//if ((tb->pc & TARGET_PAGE_MASK) == (dest & TARGET_PAGE_MASK) && likely(!ctx->singlestep_enabled)) {
+
+	if(DECAF_is_BlockEndCallback_needed(tb->pc, dest))
+	{
+	  TCGv_ptr tmpTb = tcg_const_ptr((tcg_target_ulong)tb);
+	  TCGv tmpFrom = tcg_temp_new();
+	  tcg_gen_movi_tl(tmpFrom, cur_pc);
+	  gen_helper_DECAF_invoke_block_end_callback(cpu_env, tmpTb, tmpFrom);
+	  tcg_temp_free(tmpFrom);
+	  tcg_temp_free_ptr(tmpTb);
+	}
+
 #endif /* AWH */
+    if (use_goto_tb(ctx, dest)) {
         tcg_gen_goto_tb(n);
         gen_save_pc(dest);
         tcg_gen_exit_tb((uintptr_t)ctx->tb + n);
@@ -10874,6 +10875,8 @@ static inline void clear_branch_hflags(DisasContext *ctx)
 
 static void gen_branch(DisasContext *ctx, int insn_bytes)
 {
+
+
     if (ctx->hflags & MIPS_HFLAG_BMASK) {
         int proc_hflags = ctx->hflags & MIPS_HFLAG_BMASK;
         /* Branches completion */
@@ -10888,7 +10891,7 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
             /* unconditional branch */
             if (proc_hflags & MIPS_HFLAG_BX) {
                 tcg_gen_xori_i32(hflags, hflags, MIPS_HFLAG_M16);
-            }
+            }    
             gen_goto_tb(ctx, 0, ctx->btarget);
             break;
         case MIPS_HFLAG_BL:
@@ -10899,7 +10902,6 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
             /* Conditional branch */
             {
                 TCGLabel *l1 = gen_new_label();
-
                 tcg_gen_brcondi_tl(TCG_COND_NE, bcond, 0, l1);
                 gen_goto_tb(ctx, 1, ctx->pc + insn_bytes);
                 gen_set_label(l1);
@@ -10908,10 +10910,26 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
             break;
         case MIPS_HFLAG_BR:
             /* unconditional branch to register */
+/*
+	    if(DECAF_is_BlockEndCallback_needed(ctx->tb->pc, cur_pc) && cur_pc < 0x40a3b0 && cur_pc >= 0x40a218){
+	    	DECAF_printf("tb_pc:%x, ctx_pc:%x, target:%x, cur_pc:%x\n", ctx->tb->pc, ctx->pc, ctx->btarget, cur_pc);
+	    }
+*/
+#if 1 /* AWH - callback */
+		if(DECAF_is_BlockEndCallback_needed(ctx->tb->pc, cur_pc))
+		{
+
+		  TCGv_ptr tmpTb = tcg_const_ptr((tcg_target_ulong)(ctx->tb));
+		  TCGv tmpFrom = tcg_temp_new();
+		  tcg_gen_movi_tl(tmpFrom, cur_pc);
+		  gen_helper_DECAF_invoke_block_end_callback(cpu_env, tmpTb, tmpFrom);
+		  tcg_temp_free(tmpFrom);
+		  tcg_temp_free_ptr(tmpTb);
+		}
+#endif /* AWH */
             if (ctx->insn_flags & (ASE_MIPS16 | ASE_MICROMIPS)) {
                 TCGv t0 = tcg_temp_new();
                 TCGv_i32 t1 = tcg_temp_new_i32();
-
                 tcg_gen_andi_tl(t0, btarget, 0x1);
                 tcg_gen_trunc_tl_i32(t1, t0);
                 tcg_temp_free(t0);
@@ -10919,7 +10937,6 @@ static void gen_branch(DisasContext *ctx, int insn_bytes)
                 tcg_gen_shli_i32(t1, t1, MIPS_HFLAG_M16_SHIFT);
                 tcg_gen_or_i32(hflags, hflags, t1);
                 tcg_temp_free_i32(t1);
-
                 tcg_gen_andi_tl(cpu_PC, btarget, ~(target_ulong)0x1);
             } else {
                 tcg_gen_mov_tl(cpu_PC, btarget);
