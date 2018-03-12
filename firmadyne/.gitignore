@@ -1,9 +1,3 @@
-firmadyne.config
-
 *.o
-*.armel
-*.mipseb
-*.mipsel
-binaries/
 images/
 scratch/
