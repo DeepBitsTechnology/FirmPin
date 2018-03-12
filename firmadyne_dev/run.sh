@@ -60,7 +60,7 @@ sleep 1s
 
 AFL="../afl-fuzz -t 800000+ -i ../inputs -o ../outputs -QQ --"
 QEMU="../qemu_mode/qemu/mipsel-softmmu/qemu-system-mipsel"
-KERNEL="./binaries/vmlinux_3.2.1_mipsel"
+KERNEL="./binaries/vmlinux.mipsel" #vmlinux_3.2.1_mipsel
 echo ${KERNEL}
 
 #gdb -q --args \
