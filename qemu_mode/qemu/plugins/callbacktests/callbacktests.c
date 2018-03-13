@@ -71,7 +71,7 @@ static int pid_index = 0;
 static target_ulong kernel_sp = 0;
 static int run_test = 0;
 static int http_request = 0;
-
+static int main_start = 0;
 
 int pid_exist(int pid){
 	for(int i=0; i<pid_index; i++){
@@ -124,6 +124,7 @@ static callbacktest_t callbacktests[CALLBACKTESTS_TEST_COUNT] = {
 
 static callbacktest_pid[100] = {0};
 static callbacktest_t callbacktests[100] = {};
+static callbacktest_t callbacktests_end_block[100] = {};
 
 int search_callbacktest_pid(int pid){
 	for(int i=0; i<100; i ++){
@@ -157,7 +158,7 @@ int target_exist(char *name){
 static uint32_t targetpid;
 static uint32_t targetcr3;
 
-static void runTests(int);
+static void runTests(void);
 
 static void callbacktests_printSummary(void);
 static void callbacktests_resetTests(void);
@@ -189,6 +190,382 @@ static void callbacktests_resetTests(void)
   }
 }
 
+
+
+static int count = 0;
+static int poll = 0;
+static int api_time = 0;
+
+
+static plugin_interface_t keylogger_interface;
+
+DECAF_Handle handle_ins_end_cb = DECAF_NULL_HANDLE;
+DECAF_Handle handle_block_end_cb = DECAF_NULL_HANDLE;
+DECAF_Handle handle_block_begin_cb = DECAF_NULL_HANDLE;
+FILE * keylogger_log=DECAF_NULL_HANDLE;
+
+#define MAX_STACK_SIZE 5000
+char modname_t[512];
+char func_name_t[512];
+uint32_t sys_call_ret_stack[MAX_STACK_SIZE];
+uint32_t sys_call_entry_stack[MAX_STACK_SIZE];
+uint32_t cr3_stack[MAX_STACK_SIZE];
+uint32_t stack_top = 0;
+void check_call(DECAF_Callback_Params *param)
+{
+	CPUState *env=param->be.env;
+	CPUArchState *mips_env = env->env_ptr;
+	if(env == NULL)
+	return;
+	target_ulong pc = param->be.next_pc;
+	target_ulong cr3 = DECAF_getPGD(env) ;
+	if(stack_top == MAX_STACK_SIZE)
+	{
+     //if the stack reaches to the max size, we ignore the data from stack bottom to MAX_STACK_SIZE/10
+		memcpy(sys_call_ret_stack,&sys_call_ret_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		memcpy(sys_call_entry_stack,&sys_call_entry_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		memcpy(cr3_stack,&cr3_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		stack_top = MAX_STACK_SIZE-MAX_STACK_SIZE/10;
+		return;
+	}
+
+	//DECAF_read_mem(env,mips_env->active_tc.gpr[28],4,&sys_call_ret_stack[stack_top]);
+	sys_call_entry_stack[stack_top] = pc;
+	cr3_stack[stack_top] = cr3;
+	stack_top++;
+
+
+
+
+}
+void check_ret(DECAF_Callback_Params *param)
+{
+	if(!stack_top)
+		return;
+	//if(param->be.next_pc == sys_call_ret_stack[stack_top-1])
+	if(param->be.next_pc > 0x70000000 && param->be.next_pc < 0x90000000){
+		//0x409ed4
+		return;
+	}
+	if(param->be.next_pc == sys_call_entry_stack[stack_top-1])
+	{
+		//DECAF_printf("stack:%x\n", param->be.next_pc);
+		stack_top--;
+	}
+	else{
+		DECAF_printf("stack overflow:%x, %x, %d\n", param->be.next_pc, sys_call_entry_stack[stack_top-1], stack_top - 1);
+		for(int i=0;i< stack_top;i++){
+			DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
+		}
+		doneWork(32);
+	}
+}
+
+
+
+static void do_block_begin(DECAF_Callback_Params* param)
+{
+  	//LOK: Setup to do a more comprehensive test that does something with the parameters
+	if (1 || bVerboseTest){
+	// libuClibc-0.9.30.1.so is stripped, so no symbol was loaded
+		CPUArchState *cpu = param->bb.env->env_ptr;
+		if(param->bb.tb->pc > 0x80000000){
+			if(param->bb.tb->pc == 	0x805510f0){ //egrep ' (panic|log_store)$' /proc/kallsyms
+
+				DECAF_printf("kernel panic\n");
+				doneWork(32);
+			}
+		}
+		else if(param->bb.tb->pc < 0x80000000){
+			target_ulong pc = param->bb.tb->pc;
+			if(param->bb.tb->pc == 0x40a218){
+				DECAF_printf("main start\n");
+				main_start = 1;
+			}	
+			target_ulong pgd = DECAF_getPGD(param->bb.env);
+			char cur_process[50];
+			int pid;
+			VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
+			//DECAF_printf("process pid:%d, name:%s\n",pid, cur_process);
+			if(strcmp(cur_process, targetname[0]) == 0){
+				
+				char modname[512];
+				char functionname[512];
+				CPUArchState *tmp_cpu = param->bb.env->env_ptr;
+				if (0 == funcmap_get_name_c(param->bb.tb->pc, targetcr3, &modname,
+								&functionname)) {
+					if(strcmp(functionname, "__libc_accept") == 0 || strcmp(functionname, "accept") == 0  || strcmp(functionname, "spawn") == 0 )
+					{
+				
+						recv_block = 1;	
+					}
+					if(strcmp(functionname, "__libc_open") == 0 || strcmp(functionname, "fork") == 0 || strcmp(functionname, "_exit") == 0 ){
+						DECAF_printf("current pid:%d, %s\n", pid, functionname);
+					}
+		/*
+					if( strcmp(functionname, "__libc_fcntl") == 0 ){
+						target_ulong a0 = cpu->active_tc.gpr[4];//fd
+						DECAF_printf("%s:fd:%d\n", functionname, a0);
+					}
+		*/
+
+					if(strcmp(functionname, "execve") == 0 || strcmp(functionname, "system") == 0){
+				
+						target_ulong a0 = cpu->active_tc.gpr[4];//fd
+						char tmpBuf[50];
+						memset(tmpBuf, 0, 50);
+						DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);					
+						start_debug = 1;
+					}
+					if(strcmp(functionname, "poll") == 0)
+					{	
+						gettimeofday(&tv_poll,NULL);
+						DECAF_printf("poll time:%d,%d\n", tv_poll.tv_sec, tv_poll.tv_usec);
+						//DECAF_printf("current pid:%d, %s\n", current_pid, functionname);
+						if(afl_fork == 1){
+							doneWork(0);
+		/*
+
+							poll ++;
+							if(poll == 3){
+								doneWork(0);
+							}
+		*/
+						}
+					}
+
+					else if(strcmp(functionname, "read") == 0){
+						if(afl_start == 0){	
+							afl_start = 1;
+							gettimeofday(&tv_fork,NULL);
+							DECAF_printf("fork time:%d,%d\n", tv_fork.tv_sec, tv_fork.tv_usec);
+							startForkserver(cpu, enableTimer);
+						}				
+					}
+					else if(strcmp(functionname, "__libc_read")==0 || strcmp(functionname, "__libc_recv")==0 || strcmp(functionname, "__libc_recvfrom")==0 || strcmp(functionname, "__libc_recvmsg")==0) {
+						//gettimeofday(&tv_end,NULL);
+						//DECAF_printf("end time:%d,%d\n", tv_end.tv_sec, tv_end.tv_usec);
+						target_ulong a0 = cpu->active_tc.gpr[4];//fd
+						target_ulong a2 = cpu->active_tc.gpr[6];//nbytes	
+						if(a0 == current_fd){
+							network_read_block = 1;
+						}
+					}
+		/* calculate the slowest api 
+					if (afl_start == 1 && api_time == 0){
+						gettimeofday(&old_tv_api,NULL);
+						gettimeofday(&tv_api,NULL);
+						sec_delta = (tv_api.tv_sec - old_tv_api.tv_sec) + ((float)(tv_api.tv_usec - old_tv_api.tv_usec))/1000000;
+						memset(old_api, 0, 100);
+						strcpy(old_api, functionname);
+						old_tv_api.tv_sec = tv_api.tv_sec;
+						old_tv_api.tv_usec = tv_api.tv_usec;					
+						api_time = 1;	
+					}
+					else if(afl_start == 1 && api_time == 1){
+						gettimeofday(&tv_api,NULL);
+						float sec = (tv_api.tv_sec - old_tv_api.tv_sec) + ((float)(tv_api.tv_usec - old_tv_api.tv_usec))/1000000;
+						if(strcmp(old_api, "__libc_open") == 0){	
+							DECAF_printf("time:%s,%f\n",old_api, sec);
+						}
+						if(sec > sec_delta){
+							sec_delta = sec;
+							DECAF_printf("long time:%s,%f\n",old_api, sec);
+						}
+						memset(old_api, 0, 100);
+						strcpy(old_api, functionname);
+						old_tv_api.tv_sec = tv_api.tv_sec;
+						old_tv_api.tv_usec = tv_api.tv_usec;
+					}
+		*/	
+
+					if (afl_start == 1){
+						//gettimeofday(&tv_api,NULL);
+						//DECAF_printf("%s\n", functionname);
+						//DECAF_printf("%s:%d\n", functionname, tv_api.tv_usec);
+						//DECAF_printf("%s:%x\n", functionname, param->bb.tb->pc);
+					}
+				
+
+				}
+				else if(param->bb.tb->pc < 0x500000){
+					if(recv_block == 1){
+						recv_block = 0;
+						target_ulong v0 = cpu->active_tc.gpr[2];//return value (fd)
+						if (v0!=0 && v0!=0xffffffff){
+		/*
+							if(afl_start == 0){	
+								afl_start = 1;
+								startForkserver(cpu, enableTimer);
+							}
+		*/
+							current_fd = v0;
+					
+						}
+					}
+
+					else if(network_read_block == 1){
+
+						network_read_block = 0;
+		//0x4072f8 after read
+						CPUArchState *cpu = param->bb.env->env_ptr;
+						target_ulong pc = cpu->active_tc.PC;
+						target_ulong a0 = cpu->active_tc.gpr[4];//fd
+						target_ulong a1 = cpu->active_tc.gpr[5];//buf
+						target_ulong a2 = cpu->active_tc.gpr[6];//nbytes
+						target_ulong v0 = cpu->active_tc.gpr[2];//return value (read)
+		//real network data
+						char *buf1 = (char *)malloc(v0);
+						DECAF_printf("a2:%d, v0:%d\n", a2, v0);
+						DECAF_read_mem(param->bb.env, a1, v0, buf1);
+						DECAF_printf("network is %s\n", buf1);
+						free(buf1);
+		//read network data end 
+		//aflcall
+
+						if(afl_start == 1 && afl_fork == 0){
+					
+							afl_fork = 1;	
+	
+							char * buf;
+							buf = (char *)malloc(4096);
+							memset(buf, 0, 4096);
+							u_long bufsz = 4096;
+							char filename[500];
+							ulong sz = getWork(cpu, buf, bufsz);
+							startWork(cpu, 0x400000L, 0x500000L);
+							current_data = buf;
+							rest_len = sz; 
+							DECAF_printf("rest_len:%d\, current data len:%d\n", rest_len, strlen(current_data));
+
+
+						}
+						DECAF_printf("current data is %s\n", current_data);
+		//read network data end 
+						DECAF_printf("current_data:%x, restlen:%d, a1:%x, a2:%d, v0:%d\n", current_data, rest_len, a1, a2, v0);
+						if(rest_len != 0){// rest_len is the length of virtual buffer
+							if (rest_len + 1 >= a2){// a2 is the maximum recv length for once
+								DECAF_write_mem(param->bb.env, a1, a2, current_data);
+								cpu->active_tc.gpr[2] = a2;//need to modify v0
+								current_data += a2;
+								rest_len -= a2;
+							}
+							else{
+
+								DECAF_write_mem(param->bb.env, a1, rest_len, current_data);
+								cpu->active_tc.gpr[2] = rest_len;//need to modify v0
+								current_data += rest_len;
+								rest_len = 0;
+							}	
+							char *buf2 = (char *)malloc(a2);
+							DECAF_read_mem(param->bb.env, a1, a2, buf2);
+							DECAF_printf("current network is %s\nlen:%d\n", buf2, strlen(buf2));
+							free(buf2);
+
+						}
+				
+						else{// if input data's data is too little, it will end up with donework
+							DECAF_printf("		donework done:%d,  parent pid:%d\n",getpid(), getppid());
+							free(buf); //current_data 
+							//doneWork(0);
+						}
+
+					}
+
+					else if(start_debug == 1){
+						start_debug = 0;
+						DECAF_printf("next ins:%x,pid:%d\n", param->bb.tb->pc, current_pid);
+						//gettimeofday(&tv_next,NULL);
+						//DECAF_printf("next ins time:%d,%d\n", tv_next.tv_sec, tv_next.tv_usec);
+				
+					}
+		/*
+					else if(afl_fork == 1){
+
+						DECAF_printf("next instruction:%x\n", param->bb.tb->pc);
+						gettimeofday(&tv_next,NULL);
+						DECAF_printf("next ins time:%d,%d\n", tv_next.tv_sec, tv_next.tv_usec);
+
+					}
+
+					if(param->bb.tb->pc == 0x402230){
+						DECAF_printf("hedwig.cgi end\n");
+						doneWork(0);
+					}
+		*/
+
+				}
+			}
+		}
+	}
+}
+
+static void do_block_end(DECAF_Callback_Params* param){	
+	unsigned char insn_buf[4];
+	int is_call = 0, is_ret = 0;
+	int b;
+	target_ulong pgd = DECAF_getPGD(param->be.env);
+	char cur_process[50];
+	int pid;
+	VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
+	if(strcmp(cur_process, targetname[0]) == 0 && param->be.cur_pc < 0x70000000 && main_start == 1){
+		//DECAF_printf("block end pc: %x\n", param->be.cur_pc);
+		DECAF_read_mem(param->be.env,param->be.cur_pc - 4 ,sizeof(char)*4,insn_buf);
+		if(insn_buf[0] == 9 && (insn_buf[1]&7) == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
+			param->be.next_pc = param->be.cur_pc + 4;
+			int jump_reg = (insn_buf[3] * 8) + (insn_buf[2]/32);
+			int next_reg = insn_buf[1]/8;			
+			
+			int jump_value = ((CPUArchState *)param->be.env->env_ptr)->active_tc.gpr[25];
+			if(next_reg == 31 && jump_value < 0x411910){
+				// 0x42516c extern, 0x411910 mips.stub
+				//DECAF_printf("jalr ins:%x, next pc:%x, jalr reg:%d, jalr next reg:%d\n",param->be.cur_pc, param->be.next_pc, jump_reg, next_reg);
+				is_call = 1;
+			}
+		}else if((insn_buf[3] & 252) == 12){
+			param->be.next_pc = param->be.cur_pc + 4;
+			//DECAF_printf("jal ins:%x, next pc:%x\n",param->be.cur_pc, param->be.next_pc);
+			is_call = 1;
+		}else if((insn_buf[0] & 63) == 8 && insn_buf[1] == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
+			int reg = (insn_buf[3] *8) + (insn_buf[2]/32);
+			
+			if(reg == 31){ 
+				//jr $ra, not jr other(such as jr $t9, jump at the end of function)	
+				//DECAF_printf("jr ins:%x, next pc:%x, jr reg:%d\n",param->be.cur_pc, param->be.next_pc, reg);		
+				is_ret = 1;
+			}
+			else if(reg == 25){
+				//jr $ra happens in lib function
+				stack_top --;
+			}	
+		}
+		if (is_call)
+		check_call(param);
+		else if (is_ret)
+		check_ret(param);
+	}
+}
+
+
+static void runTests()
+{
+
+
+}
+
+void do_callbacktests(Monitor* mon, const QDict* qdict)
+{
+  if ((qdict != NULL) && (qdict_haskey(qdict, "procname")))
+  {
+ 
+    strncpy(targetname[target_index], qdict_get_str(qdict, "procname"), 512);
+    targetname[target_index][511] = '\0';
+    target_index++;
+  }
+  curTest = 0;
+  callbacktests_resetTests();
+}
+
 static void callbacktests_loadmainmodule_callback(VMI_Callback_Params* params)
 {
   char procname[64];
@@ -211,22 +588,35 @@ static void callbacktests_loadmainmodule_callback(VMI_Callback_Params* params)
   int index = target_exist(procname);
   if (index != -1 && run_test == 0)
   {
-    //run_test = 1;
-/*
-    if(mkfifo("myfifo",0666) < 0){
-	DECAF_printf("MKFIFO ERROR\n");
-    }
-*/
-    DECAF_printf("\nProcname:%s,targetname:%s,targetpid:%d\n",targetname[index],procname,pid);
-    targetpid = pid;
-    targetcr3 = params->cp.cr3;
-    DECAF_printf("cr3:%x\n",targetcr3);
-    runTests(index);
-  }
+	//run_test = 1;
+	DECAF_printf("\nProcname:%s,targetname:%s,targetpid:%d\n",targetname[0],procname,pid);
+	targetpid = pid;
+	targetcr3 = params->cp.cr3;
+	DECAF_printf("cr3:%x\n",targetcr3);
+	if (curTest >= CALLBACKTESTS_TEST_COUNT)
+	{
+		DECAF_printf("process is too many\n");
+		return;
+	}
+
+	DECAF_printf("Process [%s] with pid [%d] started at %u:%u\n", targetname[0], targetpid, callbacktests[curTest].tick.tv_sec, callbacktests[curTest].tick.tv_usec);
+	DECAF_printf("Registering for callback\n");
+
+	callbacktests[curTest].cbtype = DECAF_BLOCK_BEGIN_CB;
+	callbacktests[curTest].handle = DECAF_registerOptimizedBlockBeginCallback(&do_block_begin, NULL, callbacktests[curTest].from, callbacktests[curTest].ocbtype);
+	callbacktests[curTest].count = 0;
+	curTest ++;
+	callbacktests[curTest].cbtype = DECAF_BLOCK_END_CB;	
+	callbacktests[curTest].handle = DECAF_registerOptimizedBlockEndCallback(&do_block_end, NULL, INV_ADDR, INV_ADDR);
+	callbacktests[curTest].count = 0;	
+	curTest ++;
+	DECAF_printf("Callback Registered\n");
+	}
 }
 
 static void callbacktests_removeproc_callback(VMI_Callback_Params* params)
 {
+/*
   double elapsedtime;
 
   if (params == NULL)
@@ -267,352 +657,7 @@ static void callbacktests_removeproc_callback(VMI_Callback_Params* params)
     targetpid = (uint32_t)(-1);
     targetcr3 = 0;
   }
-}
-
-static int count = 0;
-static int poll = 0;
-static int api_time = 0;
-
-static void callbacktests_genericcallback(DECAF_Callback_Params* param)
-{
-  if (curTest >= CALLBACKTESTS_TEST_COUNT)
-  {
-    return;
-  }
-
-
-
-  //LOK: Setup to do a more comprehensive test that does something with the parameters
-  if (1 || bVerboseTest)
-  //if (0)
-  {
-
-    switch(callbacktests[curTest].cbtype)
-    {
-      case (DECAF_BLOCK_BEGIN_CB):
-      {
-// libuClibc-0.9.30.1.so is stripped, so no symbol was loaded
-	CPUArchState *cpu = param->bb.env->env_ptr;
-	if(param->bb.tb->pc > 0x80000000){
-		if(param->bb.tb->pc == 	0x805510f0){ //egrep ' (panic|log_store)$' /proc/kallsyms
-
-			DECAF_printf("kernel panic\n");
-			doneWork(32);
-		}
-	}
-	else if(param->bb.tb->pc < 0x80000000){
-
-		target_ulong pgd = DECAF_getPGD(param->bb.env);
-		char cur_process[50];
-		int pid;
-		VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
-		//DECAF_printf("process pid:%d, name:%s\n",pid, cur_process);
-		if(strcmp(cur_process, "httpd") == 0){
-			char modname[512];
-			char functionname[512];
-			CPUArchState *tmp_cpu = param->bb.env->env_ptr;
-			if (0 == funcmap_get_name_c(param->bb.tb->pc, targetcr3, &modname,
-							&functionname)) {
-				if(strcmp(functionname, "__libc_accept") == 0 || strcmp(functionname, "accept") == 0  || strcmp(functionname, "spawn") == 0 )
-				{
-					
-					recv_block = 1;	
-				}
-				if(strcmp(functionname, "__libc_open") == 0 || strcmp(functionname, "fork") == 0 || strcmp(functionname, "_exit") == 0 ){
-					//DECAF_printf("current pid:%d, %s\n", current_pid, functionname);
-				}
-/*
-				if( strcmp(functionname, "__libc_fcntl") == 0 ){
-					target_ulong a0 = cpu->active_tc.gpr[4];//fd
-					DECAF_printf("%s:fd:%d\n", functionname, a0);
-				}
 */
-
-				if(strcmp(functionname, "execve") == 0 || strcmp(functionname, "system") == 0){
-					
-					target_ulong a0 = cpu->active_tc.gpr[4];//fd
-					char tmpBuf[50];
-					memset(tmpBuf, 0, 50);
-					DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);					
-					start_debug = 1;
-				}
-				if(strcmp(functionname, "poll") == 0)
-				{	
-					gettimeofday(&tv_poll,NULL);
-					DECAF_printf("poll time:%d,%d\n", tv_poll.tv_sec, tv_poll.tv_usec);
-					//DECAF_printf("current pid:%d, %s\n", current_pid, functionname);
-					if(afl_fork == 1){
-						doneWork(0);
-/*
-
-						poll ++;
-						if(poll == 3){
-							doneWork(0);
-						}
-*/
-					}
-				}
-
-				else if(strcmp(functionname, "read") == 0){
-					if(afl_start == 0){	
-						afl_start = 1;
-						gettimeofday(&tv_fork,NULL);
-						DECAF_printf("fork time:%d,%d\n", tv_fork.tv_sec, tv_fork.tv_usec);
-						startForkserver(cpu, enableTimer);
-					}				
-				}
-				else if(strcmp(functionname, "__libc_read")==0 || strcmp(functionname, "__libc_recv")==0 || strcmp(functionname, "__libc_recvfrom")==0 || strcmp(functionname, "__libc_recvmsg")==0) {
-					//gettimeofday(&tv_end,NULL);
-					//DECAF_printf("end time:%d,%d\n", tv_end.tv_sec, tv_end.tv_usec);
-					target_ulong a0 = cpu->active_tc.gpr[4];//fd
-					target_ulong a2 = cpu->active_tc.gpr[6];//nbytes	
-					if(a0 == current_fd){
-						network_read_block = 1;
-					}
-				}
-/* calculate the slowest api 
-				if (afl_start == 1 && api_time == 0){
-					gettimeofday(&old_tv_api,NULL);
-					gettimeofday(&tv_api,NULL);
-					sec_delta = (tv_api.tv_sec - old_tv_api.tv_sec) + ((float)(tv_api.tv_usec - old_tv_api.tv_usec))/1000000;
-					memset(old_api, 0, 100);
-					strcpy(old_api, functionname);
-					old_tv_api.tv_sec = tv_api.tv_sec;
-					old_tv_api.tv_usec = tv_api.tv_usec;					
-					api_time = 1;	
-				}
-				else if(afl_start == 1 && api_time == 1){
-					gettimeofday(&tv_api,NULL);
-					float sec = (tv_api.tv_sec - old_tv_api.tv_sec) + ((float)(tv_api.tv_usec - old_tv_api.tv_usec))/1000000;
-					if(strcmp(old_api, "__libc_open") == 0){	
-						DECAF_printf("time:%s,%f\n",old_api, sec);
-					}
-					if(sec > sec_delta){
-						sec_delta = sec;
-						DECAF_printf("long time:%s,%f\n",old_api, sec);
-					}
-					memset(old_api, 0, 100);
-					strcpy(old_api, functionname);
-					old_tv_api.tv_sec = tv_api.tv_sec;
-					old_tv_api.tv_usec = tv_api.tv_usec;
-				}
-*/	
-
-				if (afl_start == 1){
-					//gettimeofday(&tv_api,NULL);
-					//DECAF_printf("%s\n", functionname);
-					//DECAF_printf("%s:%d\n", functionname, tv_api.tv_usec);
-					//DECAF_printf("%s:%x\n", functionname, param->bb.tb->pc);
-				}
-					
-
-			}
-			else if(param->bb.tb->pc < 0x500000){
-				if(recv_block == 1){
-					recv_block = 0;
-					target_ulong v0 = cpu->active_tc.gpr[2];//return value (fd)
-					if (v0!=0 && v0!=0xffffffff){
-/*
-						if(afl_start == 0){	
-							afl_start = 1;
-							startForkserver(cpu, enableTimer);
-						}
-*/
-						current_fd = v0;
-						
-					}
-				}
-
-				else if(network_read_block == 1){
-
-					network_read_block = 0;
-	//0x4072f8 after read
-					CPUArchState *cpu = param->bb.env->env_ptr;
-					target_ulong pc = cpu->active_tc.PC;
-					target_ulong a0 = cpu->active_tc.gpr[4];//fd
-					target_ulong a1 = cpu->active_tc.gpr[5];//buf
-					target_ulong a2 = cpu->active_tc.gpr[6];//nbytes
-					target_ulong v0 = cpu->active_tc.gpr[2];//return value (read)
-	//real network data
-					char *buf1 = (char *)malloc(v0);
-					DECAF_printf("a2:%d, v0:%d\n", a2, v0);
-					DECAF_read_mem(param->bb.env, a1, v0, buf1);
-					DECAF_printf("network is %s\n", buf1);
-					free(buf1);
-	//read network data end 
-	//aflcall
-
-					if(afl_start == 1 && afl_fork == 0){
-						
-						afl_fork = 1;	
-		
-						char * buf;
-						buf = (char *)malloc(4096);
-						memset(buf, 0, 4096);
-						u_long bufsz = 4096;
-						char filename[500];
-						ulong sz = getWork(cpu, buf, bufsz);
-						startWork(cpu, 0x400000L, 0x500000L);
-						current_data = buf;
-						rest_len = sz; 
-						DECAF_printf("rest_len:%d\, current data len:%d\n", rest_len, strlen(current_data));
-
-
-					}
-					DECAF_printf("current data is %s\n", current_data);
-	//read network data end 
-					DECAF_printf("current_data:%x, restlen:%d, a1:%x, a2:%d, v0:%d\n", current_data, rest_len, a1, a2, v0);
-					if(rest_len != 0){// rest_len is the length of virtual buffer
-						if (rest_len + 1 >= a2){// a2 is the maximum recv length for once
-							DECAF_write_mem(param->bb.env, a1, a2, current_data);
-							cpu->active_tc.gpr[2] = a2;//need to modify v0
-							current_data += a2;
-							rest_len -= a2;
-						}
-						else{
-
-							DECAF_write_mem(param->bb.env, a1, rest_len, current_data);
-							cpu->active_tc.gpr[2] = rest_len;//need to modify v0
-							current_data += rest_len;
-							rest_len = 0;
-						}	
-						char *buf2 = (char *)malloc(a2);
-						DECAF_read_mem(param->bb.env, a1, a2, buf2);
-						DECAF_printf("current network is %s\nlen:%d\n", buf2, strlen(buf2));
-						free(buf2);
-
-					}
-					
-					else{// if input data's data is too little, it will end up with donework
-						DECAF_printf("		donework done:%d,  parent pid:%d\n",getpid(), getppid());
-						free(buf); //current_data 
-						//doneWork(0);
-					}
-
-				}
-
-				else if(start_debug == 1){
-					start_debug = 0;
-					DECAF_printf("next ins:%x,pid:%d\n", param->bb.tb->pc, current_pid);
-					//gettimeofday(&tv_next,NULL);
-					//DECAF_printf("next ins time:%d,%d\n", tv_next.tv_sec, tv_next.tv_usec);
-					
-				}
-/*
-				else if(afl_fork == 1){
-
-					DECAF_printf("next instruction:%x\n", param->bb.tb->pc);
-					gettimeofday(&tv_next,NULL);
-					DECAF_printf("next ins time:%d,%d\n", tv_next.tv_sec, tv_next.tv_usec);
-
-				}
-
-				if(param->bb.tb->pc == 0x402230){
-					DECAF_printf("hedwig.cgi end\n");
-					doneWork(0);
-				}
-*/
-
-			}
-		}
-	}	
-        break;
-      }
-      case (DECAF_BLOCK_END_CB):
-      {
-        break;
-
-      }
-      case (DECAF_INSN_BEGIN_CB):
-      {
-        //do nothing yet?
-	CPUState *env = param->ib.env;
-	DECAF_printf("pc:%x\n", ((CPUArchState *)env->env_ptr)->active_tc.PC);
-	break;
-      }
-      case (DECAF_INSN_END_CB):
-      {
-        //do nothing yet?
-	CPUState *env = param->ie.env;
-	target_ulong pc = 0;
-	CPUArchState *env_ptr = (CPUArchState *)env->env_ptr;
-	if(env_ptr)
-	{
-		TCState *tc = &(env_ptr->active_tc);
-		if(tc)
-		{
-			pc = tc->PC;
-			DECAF_printf("pc:%x\n", pc);
-		}
-	}
-	break;
-      }
-    }
-  }
-
-  //TODO: Add support for ONLY tracking target process and not ALL processes
-  callbacktests[curTest].count++;
-}
-
-static void runTests(int index)
-{
-  if (curTest >= CALLBACKTESTS_TEST_COUNT)
-  {
-    DECAF_printf("process is too many\n");
-    return;
-  }
-
-  DECAF_printf("Process [%s] with pid [%d] started at %u:%u\n", targetname[index], targetpid, callbacktests[curTest].tick.tv_sec, callbacktests[curTest].tick.tv_usec);
-  DECAF_printf("Registering for callback\n");
-  switch(callbacktests[curTest].cbtype)
-  {
-    case (DECAF_BLOCK_BEGIN_CB):
-    {
-      char callback_function[50];
-      sprintf(callback_function, "callbacktests_genericcallback_%d", targetpid);
-      callbacktests[curTest].handle = DECAF_registerOptimizedBlockBeginCallback(&callbacktests_genericcallback, NULL, callbacktests[curTest].from, callbacktests[curTest].ocbtype);
-      DECAF_printf("register callback %x\n", callbacktests[curTest].handle);
-      //callbacktests[curTest].handle = DECAF_registerOptimizedBlockBeginCallback(&callback_function, NULL, callbacktests[curTest].from, callbacktests[curTest].ocbtype);
-      callbacktest_pid[curTest] = targetpid;
-      curTest ++;
-      break;
-    }
-    case (DECAF_BLOCK_END_CB):
-    {
-      DECAF_printf("from and to: %d,%d\n",callbacktests[curTest].from, callbacktests[curTest].to);
-      callbacktests[curTest].handle = DECAF_registerOptimizedBlockEndCallback(&callbacktests_genericcallback, NULL, callbacktests[curTest].from, callbacktests[curTest].to);
-      break;
-    }
-    default:
-    case (DECAF_INSN_BEGIN_CB):
-    case (DECAF_INSN_END_CB):
-    {
-      callbacktests[curTest].handle = DECAF_register_callback(callbacktests[curTest].cbtype, &callbacktests_genericcallback, NULL);
-    }
-    
-  }
-
-  if (callbacktests[curTest - 1].handle == DECAF_NULL_HANDLE)
-  {
-    DECAF_printf("Could not register the event\n");
-    return;
-  }
-
-  callbacktests[curTest].count = 0;
-  DECAF_printf("Callback Registered\n");
-}
-
-void do_callbacktests(Monitor* mon, const QDict* qdict)
-{
-  if ((qdict != NULL) && (qdict_haskey(qdict, "procname")))
-  {
- 
-    strncpy(targetname[target_index], qdict_get_str(qdict, "procname"), 512);
-    targetname[target_index][511] = '\0';
-    target_index++;
-  }
-  curTest = 0;
-  callbacktests_resetTests();
 }
 
 static int callbacktests_init(void)
@@ -637,8 +682,7 @@ static int callbacktests_init(void)
 	callbacktests[i].elapsedtime = 0.0;
 	
 	targetname[i][0] = '\0';
-  } 
-
+  }
 
   processbegin_handle = VMI_register_callback(VMI_CREATEPROC_CB, &callbacktests_loadmainmodule_callback, NULL);
   removeproc_handle = VMI_register_callback(VMI_REMOVEPROC_CB, &callbacktests_removeproc_callback, NULL);
