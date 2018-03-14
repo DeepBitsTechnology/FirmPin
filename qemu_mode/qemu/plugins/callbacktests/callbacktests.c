@@ -73,6 +73,7 @@ static int run_test = 0;
 static int http_request = 0;
 static int main_start = 0;
 
+
 int pid_exist(int pid){
 	for(int i=0; i<pid_index; i++){
 		if (pid == httpd_pid[i]){
@@ -144,6 +145,9 @@ static DECAF_Handle processbegin_handle = DECAF_NULL_HANDLE;
 static DECAF_Handle removeproc_handle = DECAF_NULL_HANDLE;
 
 static char targetname[100][512];// 10 program, such as httpd, hedwig.cig
+static int target_main_address[100];
+
+
 static int target_index = 0;
 
 int target_exist(char *name){
@@ -242,23 +246,22 @@ void check_ret(DECAF_Callback_Params *param)
 {
 	if(!stack_top)
 		return;
-	//if(param->be.next_pc == sys_call_ret_stack[stack_top-1])
-	if(param->be.next_pc > 0x70000000 && param->be.next_pc < 0x90000000){
-		//0x409ed4
-		return;
-	}
-	if(param->be.next_pc == sys_call_entry_stack[stack_top-1])
-	{
-		//DECAF_printf("stack:%x\n", param->be.next_pc);
-		stack_top--;
-	}
-	else{
-		DECAF_printf("stack overflow:%x, %x, %d\n", param->be.next_pc, sys_call_entry_stack[stack_top-1], stack_top - 1);
-		for(int i=0;i< stack_top;i++){
-			DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
+	if(stack_top > 0){
+		if(param->be.next_pc == sys_call_entry_stack[stack_top-1])
+		{
+			stack_top--;
 		}
-		doneWork(32);
+		else{
+			DECAF_printf("stack overflow:%x, %x, %d\n", param->be.next_pc, sys_call_entry_stack[stack_top-1], stack_top - 1);
+
+			for(int i=0;i< stack_top;i++){
+				DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
+			}
+
+			doneWork(32);
+		}
 	}
+	
 }
 
 
@@ -278,21 +281,20 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		}
 		else if(param->bb.tb->pc < 0x80000000){
 			target_ulong pc = param->bb.tb->pc;
-			if(param->bb.tb->pc == 0x40a218){
-				DECAF_printf("main start\n");
-				main_start = 1;
-			}	
 			target_ulong pgd = DECAF_getPGD(param->bb.env);
 			char cur_process[50];
 			int pid;
 			VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
-			//DECAF_printf("process pid:%d, name:%s\n",pid, cur_process);
-			if(strcmp(cur_process, targetname[0]) == 0){
-				
+			int index = target_exist(cur_process);
+			if(index!=-1){
+				if(param->bb.tb->pc == target_main_address[index]){
+					//DECAF_printf("main start\n");
+					main_start = 1;
+				}
 				char modname[512];
 				char functionname[512];
 				CPUArchState *tmp_cpu = param->bb.env->env_ptr;
-				if (0 == funcmap_get_name_c(param->bb.tb->pc, targetcr3, &modname,
+				if (0 == funcmap_get_name_c(param->bb.tb->pc, pgd, &modname,
 								&functionname)) {
 					if(strcmp(functionname, "__libc_accept") == 0 || strcmp(functionname, "accept") == 0  || strcmp(functionname, "spawn") == 0 )
 					{
@@ -302,19 +304,14 @@ static void do_block_begin(DECAF_Callback_Params* param)
 					if(strcmp(functionname, "__libc_open") == 0 || strcmp(functionname, "fork") == 0 || strcmp(functionname, "_exit") == 0 ){
 						DECAF_printf("current pid:%d, %s\n", pid, functionname);
 					}
-		/*
-					if( strcmp(functionname, "__libc_fcntl") == 0 ){
-						target_ulong a0 = cpu->active_tc.gpr[4];//fd
-						DECAF_printf("%s:fd:%d\n", functionname, a0);
-					}
-		*/
 
 					if(strcmp(functionname, "execve") == 0 || strcmp(functionname, "system") == 0){
 				
 						target_ulong a0 = cpu->active_tc.gpr[4];//fd
 						char tmpBuf[50];
 						memset(tmpBuf, 0, 50);
-						DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);					
+						DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);
+						DECAF_printf("%s,%s\n", functionname, tmpBuf);				
 						start_debug = 1;
 					}
 					if(strcmp(functionname, "poll") == 0)
@@ -323,14 +320,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 						DECAF_printf("poll time:%d,%d\n", tv_poll.tv_sec, tv_poll.tv_usec);
 						//DECAF_printf("current pid:%d, %s\n", current_pid, functionname);
 						if(afl_fork == 1){
-							doneWork(0);
-		/*
-
-							poll ++;
-							if(poll == 3){
-								doneWork(0);
-							}
-		*/
+							//doneWork(0);
 						}
 					}
 
@@ -426,7 +416,6 @@ static void do_block_begin(DECAF_Callback_Params* param)
 						if(afl_start == 1 && afl_fork == 0){
 					
 							afl_fork = 1;	
-	
 							char * buf;
 							buf = (char *)malloc(4096);
 							memset(buf, 0, 4096);
@@ -508,7 +497,9 @@ static void do_block_end(DECAF_Callback_Params* param){
 	char cur_process[50];
 	int pid;
 	VMI_find_process_by_cr3_c(pgd, cur_process, 50, &pid);
-	if(strcmp(cur_process, targetname[0]) == 0 && param->be.cur_pc < 0x70000000 && main_start == 1){
+	int index = target_exist(cur_process);
+	if(index==1 && param->be.cur_pc < 0x80000000){
+		//DECAF_printf("block end:%s, pc:%x\n",cur_process, param->be.cur_pc);
 		//DECAF_printf("block end pc: %x\n", param->be.cur_pc);
 		DECAF_read_mem(param->be.env,param->be.cur_pc - 4 ,sizeof(char)*4,insn_buf);
 		if(insn_buf[0] == 9 && (insn_buf[1]&7) == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
@@ -517,26 +508,31 @@ static void do_block_end(DECAF_Callback_Params* param){
 			int next_reg = insn_buf[1]/8;			
 			
 			int jump_value = ((CPUArchState *)param->be.env->env_ptr)->active_tc.gpr[25];
-			if(next_reg == 31 && jump_value < 0x411910){
-				// 0x42516c extern, 0x411910 mips.stub
-				//DECAF_printf("jalr ins:%x, next pc:%x, jalr reg:%d, jalr next reg:%d\n",param->be.cur_pc, param->be.next_pc, jump_reg, next_reg);
+			DECAF_printf("jalr ins:%x, next pc:%x, jalr reg:%d, jalr next reg:%d\n",param->be.cur_pc, param->be.next_pc, jump_reg, next_reg);
+			if(next_reg == 31 && (param->be.cur_pc < 0x419470 || param->be.cur_pc > 0x41991c) ){// ????????????
 				is_call = 1;
 			}
 		}else if((insn_buf[3] & 252) == 12){
 			param->be.next_pc = param->be.cur_pc + 4;
-			//DECAF_printf("jal ins:%x, next pc:%x\n",param->be.cur_pc, param->be.next_pc);
+			DECAF_printf("jal ins:%x, next pc:%x\n",param->be.cur_pc, param->be.next_pc);
 			is_call = 1;
 		}else if((insn_buf[0] & 63) == 8 && insn_buf[1] == 0 && (insn_buf[2]&31) == 0 && (insn_buf[3]&252) == 0){
 			int reg = (insn_buf[3] *8) + (insn_buf[2]/32);
-			
+			DECAF_printf("jr ins:%x, next pc:%x, jr reg:%d\n",param->be.cur_pc, param->be.next_pc, reg);
 			if(reg == 31){ 
-				//jr $ra, not jr other(such as jr $t9, jump at the end of function)	
-				//DECAF_printf("jr ins:%x, next pc:%x, jr reg:%d\n",param->be.cur_pc, param->be.next_pc, reg);		
+				//jr $ra, not jr other(such as jr $t9, jump at the end of function)		
 				is_ret = 1;
 			}
 			else if(reg == 25){
 				//jr $ra happens in lib function
-				stack_top --;
+				//if(param->be.cur_pc < 0x70000000){
+					//DECAF_printf("jr ins:%x, next pc:%x, jr reg:%d\n",param->be.cur_pc, param->be.next_pc, reg);
+				//}
+/*
+				if(stack_top > 0){
+					stack_top --;
+				}
+*/
 			}	
 		}
 		if (is_call)
@@ -547,11 +543,6 @@ static void do_block_end(DECAF_Callback_Params* param){
 }
 
 
-static void runTests()
-{
-
-
-}
 
 void do_callbacktests(Monitor* mon, const QDict* qdict)
 {
@@ -588,8 +579,8 @@ static void callbacktests_loadmainmodule_callback(VMI_Callback_Params* params)
   int index = target_exist(procname);
   if (index != -1 && run_test == 0)
   {
-	//run_test = 1;
-	DECAF_printf("\nProcname:%s,targetname:%s,targetpid:%d\n",targetname[0],procname,pid);
+	run_test = 1;
+	DECAF_printf("\nProcname:%s,targetname:%s,targetpid:%d\n",procname,procname,pid);
 	targetpid = pid;
 	targetcr3 = params->cp.cr3;
 	DECAF_printf("cr3:%x\n",targetcr3);
@@ -599,11 +590,8 @@ static void callbacktests_loadmainmodule_callback(VMI_Callback_Params* params)
 		return;
 	}
 
-	DECAF_printf("Process [%s] with pid [%d] started at %u:%u\n", targetname[0], targetpid, callbacktests[curTest].tick.tv_sec, callbacktests[curTest].tick.tv_usec);
-	DECAF_printf("Registering for callback\n");
-
 	callbacktests[curTest].cbtype = DECAF_BLOCK_BEGIN_CB;
-	callbacktests[curTest].handle = DECAF_registerOptimizedBlockBeginCallback(&do_block_begin, NULL, callbacktests[curTest].from, callbacktests[curTest].ocbtype);
+	callbacktests[curTest].handle = DECAF_registerOptimizedBlockBeginCallback(&do_block_begin, NULL, INV_ADDR, callbacktests[curTest].ocbtype);
 	callbacktests[curTest].count = 0;
 	curTest ++;
 	callbacktests[curTest].cbtype = DECAF_BLOCK_END_CB;	
@@ -683,6 +671,9 @@ static int callbacktests_init(void)
 	
 	targetname[i][0] = '\0';
   }
+
+  target_main_address[0] = 0x40a218; //httpd
+  target_main_address[1] = 0x4023e0; //hedwig.cgi
 
   processbegin_handle = VMI_register_callback(VMI_CREATEPROC_CB, &callbacktests_loadmainmodule_callback, NULL);
   removeproc_handle = VMI_register_callback(VMI_REMOVEPROC_CB, &callbacktests_removeproc_callback, NULL);
