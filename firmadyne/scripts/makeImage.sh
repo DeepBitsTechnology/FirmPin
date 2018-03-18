@@ -95,12 +95,14 @@ rm "${WORK_DIR}/${IID}.tar.gz"
 
 echo "----Creating FIRMADYNE Directories----"
 mkdir "${IMAGE_DIR}/firmadyne/"
+mkdir "${IMAGE_DIR}/FILE_LOAD/"
 mkdir "${IMAGE_DIR}/firmadyne/libnvram/"
 mkdir "${IMAGE_DIR}/firmadyne/libnvram.override/"
 
 echo "----Patching Filesystem (chroot)----"
 cp $(which busybox) "${IMAGE_DIR}"
 cp "${SCRIPT_DIR}/fixImage.sh" "${IMAGE_DIR}"
+cp  -a "${FIRMWARE_DIR}/../FILE_LOAD/." "${IMAGE_DIR}/FILE_LOAD/"
 chroot "${IMAGE_DIR}" /busybox ash /fixImage.sh
 rm "${IMAGE_DIR}/fixImage.sh"
 rm "${IMAGE_DIR}/busybox"
@@ -108,6 +110,7 @@ rm "${IMAGE_DIR}/busybox"
 echo "----Setting up FIRMADYNE----"
 cp "${CONSOLE}" "${IMAGE_DIR}/firmadyne/console"
 chmod a+x "${IMAGE_DIR}/firmadyne/console"
+chmod -R a+x "${IMAGE_DIR}/FILE_LOAD/"
 mknod -m 666 "${IMAGE_DIR}/firmadyne/ttyS1" c 4 65
 
 cp "${LIBNVRAM}" "${IMAGE_DIR}/firmadyne/libnvram.so"

@@ -14,7 +14,7 @@
   
 ####DECAF: upgraded to the newest qemu version 2.10.1
 		It is included in qemu_mode/qemu dir. 
-		If there is something wrong with sleuthkit, plese comment or not comment the following code in configure.
+		If there is something wrong with sleuthkit, plese comment or not comment the following code in configure and recompile it.
 			LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make

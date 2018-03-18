@@ -2058,13 +2058,11 @@ static void blk_root_drained_end(BdrvChild *child)
 
 void DECAF_blocks_init()
 {
-	FILE *fp = fopen("DECAF_Block","a+");
 	BlockDriverState *dState;
 	int index = 0;
 	BlockDriverState *bs, *next_bs;
 
 	BlockBackend *blk;
-	
     	QTAILQ_FOREACH(blk, &block_backends, link) {
         //if (dinfo->type == IF_DEFAULT || dinfo->type == IF_SCSI || dinfo->type == IF_IDE ) {
 		printf("blockdriver:%x\n", blk_bs(blk));
@@ -2073,13 +2071,10 @@ void DECAF_blocks_init()
 						
 			DECAF_bdrv_open(index,(void *)blk);	
 		}
-		//fprintf(fp, "%d,%s\n", index,blk->name);
 		++index; 
 		
         //}
-    	}
-	fclose(fp);
-	
+    	}	
 }
 
 

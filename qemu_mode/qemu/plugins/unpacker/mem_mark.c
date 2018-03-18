@@ -14,6 +14,9 @@
  http://code.google.com/p/decaf-platform/
  */
 
+#include "qemu/osdep.h"
+#include "cpu.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>

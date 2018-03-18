@@ -7,13 +7,22 @@ include config-plugin.mak
 include $(SRC_PATH)/$(TARGET_DIR)/config-target.mak
 include $(SRC_PATH)/config-host.mak
 
+#zyw
+ARCH="MIPS"
+
+#zyw
+GLIB_CFLAGS=-pthread -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include
+
 #SLEUTHKIT_PATH=$(SRC_PATH)/shared/sleuthkit/
 LLCONF_PATH=$(SRC_PATH)/shared/llconf/
 
-DEFINES=-I. -I$(SRC_PATH) -I$(SRC_PATH)/plugins -I$(SRC_PATH)/fpu -I$(SRC_PATH)/shared -I$(SRC_PATH)/target-$(TARGET_ARCH) -I$(SRC_PATH)/$(TARGET_DIR) -I$(SRC_PATH)/slirp -I$(SRC_PATH)/shared/hooks 
+DEFINES=-I. -I$(SRC_PATH)/include -I$(SRC_PATH) -I$(SRC_PATH)/plugins -I$(SRC_PATH)/fpu -I$(SRC_PATH)/shared -I$(SRC_PATH)/target/$(TARGET_BASE_ARCH) -I$(SRC_PATH)/$(TARGET_DIR) -I$(SRC_PATH)/slirp -I$(SRC_PATH)/shared/hooks 
 DEFINES+=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE -DNEED_CPU_H
 DEFINES+=-I$(LLCONF_PATH)/install/include
 DEFINES+=-I$(GLIB_CFLAGS)
+
+#zyw
+DEFINES+=-I$(SRC_PATH)/linux-headers -I$(SRC_PATH)/tcg -I$(SRC_PATH)/tcg/$(TARGET_BASE_ARCH)
 
 CC=gcc
 CPP=g++
@@ -22,6 +31,7 @@ CFLAGS=-Wall -O2 -g -fPIC -MMD
 LDFLAGS=-g -shared 
 #LIBS=-lcrypto
 LIBS+=$(LLCONF_PATH)/src/.libs/libllconf.a
+
 
 ifeq ($(ARCH), x86_64)
 LIBS+=-L$(SRC_PATH)/shared/xed2/xed2-intel64/lib -lxed

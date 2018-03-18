@@ -14,6 +14,9 @@
  http://code.google.com/p/decaf-platform/
  */
 
+#include "qemu/osdep.h"
+#include "cpu.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -46,6 +49,7 @@ static plugin_interface_t unpacker_interface;
 //change begin
 /* Callback handles */
 DECAF_Handle block_begin_cb_handle = 0;
+DECAF_Handle insn_end_cb_handle = 0;
 DECAF_Handle mem_write_cb_handle=0;
 DECAF_Handle proc_loadmodule_cb_handle=0;
 DECAF_Handle proc_loadmainmodule_cb_handle=0;
@@ -66,14 +70,14 @@ static mon_cmd_t unpacker_term_cmds[] = {
 		{
 				.name="set_max_unpack_rounds",
 				.args_type="rounds:i",
-				.mhandler=do_set_max_unpack_rounds,
+				.cmd=do_set_max_unpack_rounds,
 				.params="rounds",
 				.help="Set the maximum unpacking rounds (100 by default)",
 		},
 		{
 				.name="trace_by_name",
 				.args_type="filename:s",
-				.mhandler=do_trace_process,
+				.cmd=do_trace_process,
 				.params="filename",
 				.help="specify the process name",
 
@@ -81,7 +85,7 @@ static mon_cmd_t unpacker_term_cmds[] = {
 		{
 				.name="stop_unpack",
 				.args_type="",
-				.mhandler=do_stop_unpack,
+				.cmd=do_stop_unpack,
 				.params="",
 				.help="Stop the unpacking process",
 
@@ -89,7 +93,7 @@ static mon_cmd_t unpacker_term_cmds[] = {
 		{
 				.name="linux_ps",
 				.args_type="",
-				.mhandler=do_linux_ps,
+				.cmd=do_linux_ps,
 				.params="",
 				.help="List the processes on linux guest system",
 
@@ -97,7 +101,7 @@ static mon_cmd_t unpacker_term_cmds[] = {
 		{
 				.name="guest_ps",
 				.args_type="",
-				.mhandler=do_guest_procs,
+				.cmd=do_guest_procs,
 				.params="",
 				.help="List the processes on guest system",
 
@@ -171,8 +175,8 @@ static void dump_unpacked_code()
   char filename[128];
   taint_record_t records[4];
 
-  eip = DECAF_getPC(cpu_single_env);
-  cr3 = DECAF_getPGD(cpu_single_env);
+  eip = DECAF_getPC(current_cpu);
+  cr3 = DECAF_getPGD(current_cpu);
 
   //we just dump one page
   start_va = (eip & TARGET_PAGE_MASK);
@@ -192,7 +196,7 @@ static void dump_unpacked_code()
     	//taintcheck_taint_virtmem(i+j, 4, 0, records);//Need change for DECAF
     }
     if(DECAF_memory_rw(NULL,i,buf,TARGET_PAGE_SIZE,0)<0)
-    	DECAF_printf(default_mon,"Cannot dump this page %08x!!! \n", i);
+    	DECAF_printf("Cannot dump this page %08x!!! \n", i);
     else
     	fwrite(buf, TARGET_PAGE_SIZE, 1, fp);
   }
@@ -201,6 +205,35 @@ static void dump_unpacked_code()
 }
 
 int inContext = 0;
+int memory_write = 0;
+static void unpacker_insn_end(DECAF_Callback_Params * dcp)
+{
+/*
+	CPUState *env = dcp->ie.env;
+	uint32_t eip, cr3; 
+	if(unpack_basename[0] == '\0')
+		return ;
+
+	cr3 = DECAF_getPGD(env);
+	if(unpack_cr3 == 0) {
+		char current_proc[256];
+		uint32_t pid;
+
+		VMI_find_process_by_cr3_c(cr3, current_proc, sizeof(current_proc), &pid);
+		if(strcasecmp(current_proc, unpack_basename) != 0)
+		  return ;
+		unpack_cr3 = cr3;
+	}
+	//inContext = (unpack_cr3 == cr3) && (!DECAF_is_in_kernel(env)); 
+	if (!inContext)
+		return ;
+	if(memory_write == 1){
+		memory_write = 0;
+		//DECAF_printf("memory write ins:%x\n", ((CPUArchState *)env->env_ptr)->current_tc);
+	}	
+*/
+}
+
 static void unpacker_block_begin(DECAF_Callback_Params*dcp)
 {
 	CPUState *env = dcp->bb.env;
@@ -271,8 +304,10 @@ static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 	virt_addr=dcp->mw.vaddr;
 	size=dcp->mw.dt;
 	//end
+	//DECAF_printf("write virtual addr:%x\n", virt_addr);
     /* Changed by Aravind: arprakas@syr.edu */
 	if(inContext) {
+		memory_write = 1;
 		set_mem_mark(virt_addr,size,(1<<size)-1);
 	} else {
 	//clean memory 
@@ -283,25 +318,28 @@ static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 }
 void unregister_callbacks()
 {
-	DECAF_printf(default_mon,"Unregister_callbacks\n");
+	DECAF_printf("Unregister_callbacks\n");
 	if(block_begin_cb_handle){
-		DECAF_printf(default_mon,"DECAF_unregister_callback(DECAF_BLOCK_BEGIN_CB,block_begin_cb_handle);\n");
+		DECAF_printf("DECAF_unregister_callback(DECAF_BLOCK_BEGIN_CB,block_begin_cb_handle);\n");
 		DECAF_unregister_callback(DECAF_BLOCK_BEGIN_CB,block_begin_cb_handle);
 	}
+	if(insn_end_cb_handle){
+		DECAF_unregister_callback(DECAF_INSN_END_CB,insn_end_cb_handle);
+	}
 	if(mem_write_cb_handle){
-		DECAF_printf(default_mon,"DECAF_unregister_callback(DECAF_MEM_WRITE_CB,mem_write_cb_handle);\n");
+		DECAF_printf("DECAF_unregister_callback(DECAF_MEM_WRITE_CB,mem_write_cb_handle);\n");
 		DECAF_unregister_callback(DECAF_MEM_WRITE_CB,mem_write_cb_handle);
 	}
 	if(proc_loadmodule_cb_handle){
-		DECAF_printf(default_mon,"VMI_unregister_callback(VMI_LOADMODULE_CB)\n");
+		DECAF_printf("VMI_unregister_callback(VMI_LOADMODULE_CB)\n");
 		VMI_unregister_callback(VMI_LOADMODULE_CB,proc_loadmodule_cb_handle);
 	}
 	if(proc_loadmainmodule_cb_handle){
-		DECAF_printf(default_mon,"VMI_unregister_callback(VMI_CREATEPROC_CB)\n");
+		DECAF_printf("VMI_unregister_callback(VMI_CREATEPROC_CB)\n");
 		VMI_unregister_callback(VMI_CREATEPROC_CB,proc_loadmainmodule_cb_handle);
 	}
 	if(proc_processend_cb_handle){
-		DECAF_printf(default_mon,"VMI_unregister_callback(VMI_REMOVEPROC_CB)\n");
+		DECAF_printf("VMI_unregister_callback(VMI_REMOVEPROC_CB)\n");
 		VMI_unregister_callback(VMI_REMOVEPROC_CB,proc_processend_cb_handle);
 	}
 }
@@ -323,18 +361,25 @@ static void unpacker_loadmainmodule_notify(VMI_Callback_Params *vcp)
 
 		if(unpack_basename[0] != 0) {
 			if(strcasecmp(name, unpack_basename)==0) {
-				DECAF_printf(default_mon,"loadmainmodule_notify called, %s\n", name);
+				DECAF_printf("loadmainmodule_notify called, %s\n", name);
 
 				monitored_pid = pid;
 				//unpack_cr3=find_cr3(pid);
 				unpack_cr3 = VMI_find_cr3_by_pid_c(pid);
 				if(!block_begin_cb_handle){
 					block_begin_cb_handle=DECAF_register_callback(DECAF_BLOCK_BEGIN_CB,unpacker_block_begin,NULL);
-					DECAF_printf(default_mon,"DECAF_register_callback(DECAF_BLOCK_BEGIN_CB) pid=%d\n",pid);
+					DECAF_printf("DECAF_register_callback(DECAF_BLOCK_BEGIN_CB) pid=%d\n",pid);
 				}
+
+				if(!insn_end_cb_handle){
+					//insn_end_cb_handle=DECAF_register_callback(DECAF_INSN_END_CB, unpacker_insn_end, NULL);
+					DECAF_printf("DECAF_register_callback(DECAF_INSN_END_CB) pid=%d\n",pid);
+
+				}
+
 				if(!mem_write_cb_handle){
 					mem_write_cb_handle=DECAF_register_callback(DECAF_MEM_WRITE_CB,unpacker_mem_write,NULL);
-					DECAF_printf(default_mon,"DECAF_register_callback(DECAF_MEM_WRITE_CB) pid=%d\n",pid);
+					DECAF_printf("DECAF_register_callback(DECAF_MEM_WRITE_CB) pid=%d\n",pid);
 				}
 				start = clock();
 			}
@@ -346,7 +391,7 @@ static void unpacker_removeproc_notify(VMI_Callback_Params *vcp)
 	uint32_t pid=vcp->rp.pid;
   if(monitored_pid != 0 && monitored_pid == pid) {
 
-	  DECAF_printf(default_mon,"unpacker_removeproc_notify pid=%d\n", pid);
+	  DECAF_printf("unpacker_removeproc_notify pid=%d\n", pid);
 	  //change begin
 	  do_stop_unpack(NULL,NULL);
 	  //change end

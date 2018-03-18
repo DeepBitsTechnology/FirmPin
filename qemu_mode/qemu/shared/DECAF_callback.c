@@ -803,20 +803,30 @@ void helper_DECAF_invoke_opcode_range_callback(
 	            (var) = (tvar))
 #endif
 
-void helper_DECAF_invoke_block_begin_callback(CPUArchState* cpu_env, TranslationBlock* tb)
+void helper_DECAF_invoke_block_begin_callback(CPUArchState* env, TranslationBlock* tb)
 {
   static callback_struct_t *cb_struct, *tmp;
   static DECAF_Callback_Params params;
 
-  if ((cpu_env == NULL) || (tb == NULL))
+  if ((env == NULL) || (tb == NULL))
   {
     return;
   }
-  //zyw CPUArchState switch to CPUState
-  MIPSCPU *cpu = mips_env_get_cpu(cpu_env);
-  CPUState *cs = CPU(cpu);
-  params.bb.env = cs;
-  params.bb.tb = tb;
+
+//zyw
+#ifdef TARGET_I386
+  	X86CPU *cpu = x86_env_get_cpu(env);
+#elif defined(TARGET_ARM)
+	ARMCPU *cpu = arm_env_get_cpu(env);
+#elif defined(TARGET_MIPS)
+	MIPSCPU *cpu = mips_env_get_cpu(env);
+#else
+  	fix this error
+#endif
+	CPUState *cs = CPU(cpu);
+	params.bb.env = cs;
+  	params.bb.tb = tb;
+//zyw
 
 PUSH_ALL()
 
@@ -857,27 +867,38 @@ PUSH_ALL()
 POP_ALL()
 }
 
-void helper_DECAF_invoke_block_end_callback(CPUArchState* env_ptr, TranslationBlock* tb, gva_t from)
+void helper_DECAF_invoke_block_end_callback(CPUArchState* env, TranslationBlock* tb, gva_t from)
 {
   static callback_struct_t *cb_struct, *cb_temp;
   static DECAF_Callback_Params params;
-  if (env_ptr == NULL) return;
+  if (env == NULL) return;
   //zyw CPUArchState switch to CPUState
-  MIPSCPU *cpu = mips_env_get_cpu(env_ptr);
-  CPUState *cs = CPU(cpu);
-  params.be.env = cs;
-  params.be.tb = tb;
-  params.be.cur_pc = from;
+//zyw
 
+#ifdef TARGET_I386
+  	X86CPU *cpu = x86_env_get_cpu(env);
+#elif defined(TARGET_ARM)
+	ARMCPU *cpu = arm_env_get_cpu(env);
+#elif defined(TARGET_MIPS)
+	MIPSCPU *cpu = mips_env_get_cpu(env);
+#else
+  fix this error
+#endif
+	CPUState *cs = CPU(cpu);
+	params.be.env = cs;
+	params.be.tb = tb;
+  	params.be.cur_pc = from;
+
+//zyw
 PUSH_ALL()
 
 #ifdef TARGET_I386
-  params.be.next_pc = env_ptr->eip + env_ptr->segs[R_CS].base;
+  params.be.next_pc = env->eip + env->segs[R_CS].base;
 #elif defined(TARGET_ARM)
-  params.be.next_pc = env_ptr->regs[15];
+  params.be.next_pc = env->regs[15];
 #elif defined(TARGET_MIPS)
-  //params.be.next_pc = env_ptr->active_tc.PC;
-  params.be.next_pc = env_ptr->active_tc.gpr[31];
+  //params.be.next_pc = env->active_tc.PC;
+  params.be.next_pc = env->active_tc.gpr[31];
 #else
   fix this error
 #endif
@@ -918,11 +939,22 @@ void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env)
 
 	if (env == 0) return;
 	
-	//zyw CPUArchState switch to CPUState
+//zyw
+
+#ifdef TARGET_I386
+  	X86CPU *cpu = x86_env_get_cpu(env);
+#elif defined(TARGET_ARM)
+	ARMCPU *cpu = arm_env_get_cpu(env);
+#elif defined(TARGET_MIPS)
 	MIPSCPU *cpu = mips_env_get_cpu(env);
+#else
+  fix this error
+#endif
 	CPUState *cs = CPU(cpu);
 	params.ib.env = cs;
-	//params.ib.env = env;
+
+//zyw
+
 PUSH_ALL()
 	//FIXME: not thread safe
 	LIST_FOREACH_SAFE(cb_struct, &callback_list_heads[DECAF_INSN_BEGIN_CB], link, cb_temp) {
@@ -938,16 +970,27 @@ POP_ALL()
 void helper_DECAF_invoke_insn_end_callback(CPUArchState* env, gva_t PC)
 {
 	static callback_struct_t *cb_struct, *cb_temp;
-    static DECAF_Callback_Params params;
+    	static DECAF_Callback_Params params;
 
 	if (env == 0) return;
-	//zyw CPUArchState switch to CPUState4
+	//zyw CPUArchState switch to CPUState
+
+//zyw
+
+#ifdef TARGET_I386
+  	X86CPU *cpu = x86_env_get_cpu(env);
+#elif defined(TARGET_ARM)
+	ARMCPU *cpu = arm_env_get_cpu(env);
+#elif defined(TARGET_MIPS)
 	env->current_tc = PC; //zyw use current_tc to present current pc. active_tc.PC is pc of block start address.
 	MIPSCPU *cpu = mips_env_get_cpu(env);
+#else
+  fix this error
+#endif
 	CPUState *cs = CPU(cpu);
 	params.ie.env = cs;
-	//params.ie.env = env;
 
+//zyw
 PUSH_ALL()
 	//FIXME: not thread safe
 	LIST_FOREACH_SAFE(cb_struct, &callback_list_heads[DECAF_INSN_END_CB], link,cb_temp) {

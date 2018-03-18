@@ -121,7 +121,6 @@ void do_block_end_cb(DECAF_Callback_Params *param)
 			int jump_value = ((CPUArchState *)param->be.env->env_ptr)->active_tc.gpr[25];
 			if(next_reg == 31 && jump_value < 0x411910){
 				// 0x42516c extern, 0x411910 mips.stub
-				DECAF_printf("jump value:%x\n", jump_value);
 				DECAF_printf("jalr ins:%x, next pc:%x, jalr reg:%d, jalr next reg:%d\n",param->be.cur_pc, param->be.next_pc, jump_reg, next_reg);
 				is_call = 1;
 			}
@@ -167,16 +166,7 @@ void do_block_begin_cb(DECAF_Callback_Params *param)
 		target_ulong pc = param->bb.tb->pc;
 		if(pc == 0x40a218){
 			DECAF_printf("main start\n");
-			main_start = 1;
-		}
-/*
-		if(main_start == 1 && funcmap_get_name_c(pc, cr3, modname_t, func_name_t) == 0)
-		{
-			DECAF_printf("function name is :%s, pc:%x\n", func_name_t, pc);
-		}
-*/
-	}
-		
+			main_start = 1;		
 }
 
 void tracing_insn_end(DECAF_Callback_Params *param)
