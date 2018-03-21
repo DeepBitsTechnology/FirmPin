@@ -74,7 +74,7 @@ extern int DECAF_unregisterOptimizedBlockEndCallback(DECAF_Handle handle);
 extern DECAF_errno_t DECAF_unregisterOpcodeRangeCallbacks(DECAF_Handle handle);
 extern void helper_DECAF_invoke_block_begin_callback(CPUArchState* env, TranslationBlock* tb);
 extern void helper_DECAF_invoke_block_end_callback(CPUArchState* env, TranslationBlock* tb, gva_t from);
-extern void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env);
+extern void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env, gva_t PC);
 extern void helper_DECAF_invoke_insn_end_callback(CPUArchState* env, gva_t PC);
 extern void helper_DECAF_invoke_eip_check_callback(gva_t source_eip, gva_t target_eip, gva_t target_eip_taint);
 extern void helper_DECAF_invoke_opcode_range_callback(

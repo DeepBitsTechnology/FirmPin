@@ -6,7 +6,7 @@ DEF_HELPER_4(aflCall, tl, env, tl, tl, tl)
 //zyw
 DEF_HELPER_2(DECAF_invoke_block_begin_callback, void, ptr, ptr)
 DEF_HELPER_3(DECAF_invoke_block_end_callback, void, ptr, ptr, tl)
-DEF_HELPER_1(DECAF_invoke_insn_begin_callback, void, ptr)
+DEF_HELPER_2(DECAF_invoke_insn_begin_callback, void, ptr, tl)
 DEF_HELPER_2(DECAF_invoke_insn_end_callback, void, ptr, tl)
 
 #ifdef CONFIG_TCG_TAINT

@@ -20,6 +20,7 @@ DEFINES=-I. -I$(SRC_PATH)/include -I$(SRC_PATH) -I$(SRC_PATH)/plugins -I$(SRC_PA
 DEFINES+=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE -DNEED_CPU_H
 DEFINES+=-I$(LLCONF_PATH)/install/include
 DEFINES+=-I$(GLIB_CFLAGS)
+DEFINES+=-I/usr/include/libxml2 #zyw xml parser
 
 #zyw
 DEFINES+=-I$(SRC_PATH)/linux-headers -I$(SRC_PATH)/tcg -I$(SRC_PATH)/tcg/$(TARGET_BASE_ARCH)
@@ -31,7 +32,7 @@ CFLAGS=-Wall -O2 -g -fPIC -MMD
 LDFLAGS=-g -shared 
 #LIBS=-lcrypto
 LIBS+=$(LLCONF_PATH)/src/.libs/libllconf.a
-
+LIBS+=/usr/lib/x86_64-linux-gnu/libxml2.so #zyw xml parser
 
 ifeq ($(ARCH), x86_64)
 LIBS+=-L$(SRC_PATH)/shared/xed2/xed2-intel64/lib -lxed

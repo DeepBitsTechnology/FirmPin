@@ -20365,8 +20365,11 @@ void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
 
 
 #if 1 /* AWH */
-	if (DECAF_is_callback_needed(DECAF_INSN_BEGIN_CB))
-		gen_helper_DECAF_invoke_insn_begin_callback(cpu_env);
+	if (DECAF_is_callback_needed(DECAF_INSN_BEGIN_CB)){
+		TCGv pc = tcg_temp_new();
+		tcg_gen_movi_tl(pc, ctx.pc);
+		gen_helper_DECAF_invoke_insn_begin_callback(cpu_env, pc); //zyw
+	}
 
         //if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP))) {
         //    tcg_gen_debug_insn_start(ctx.pc);

@@ -43,6 +43,9 @@
 #include "unpacker.h"
 #include "mem_mark.h"
 
+//zyw
+#include <libxml/parser.h>
+#include <netinet/in.h>
 
 #define size_to_mask(size) ((1u << (size)) - 1u) //size<=4
 static plugin_interface_t unpacker_interface;
@@ -54,14 +57,20 @@ DECAF_Handle mem_write_cb_handle=0;
 DECAF_Handle proc_loadmodule_cb_handle=0;
 DECAF_Handle proc_loadmainmodule_cb_handle=0;
 DECAF_Handle proc_processend_cb_handle=0;
+
+DECAF_Handle virus_block_begin_cb_handle = 0;
 //change end
 static FILE *unpacker_log = NULL;
+
+char *syscall_name[1000];
 
 
 static int max_rounds = 100;
 static int cur_version = 1;
 target_ulong unpack_cr3 = 0;
+target_ulong virus_cr3 = 0;
 char unpack_basename[256] = "";
+char virus_basename[256] = "";
 clock_t start;
 uint32_t monitored_pid = 0;
 
@@ -201,36 +210,132 @@ static void dump_unpacked_code()
     	fwrite(buf, TARGET_PAGE_SIZE, 1, fp);
   }
   fclose(fp);
+  DECAF_printf("dump over\n");
   // printf("OK after taintcheck_taint_virtmem()\n");
 }
 
 int inContext = 0;
 int memory_write = 0;
-static void unpacker_insn_end(DECAF_Callback_Params * dcp)
+static void unpacker_insn_begin(DECAF_Callback_Params * dcp)
 {
-/*
+
 	CPUState *env = dcp->ie.env;
 	uint32_t eip, cr3; 
-	if(unpack_basename[0] == '\0')
+	if(unpack_basename[0] == '\0' && virus_basename[0] == '\0')
 		return ;
 
 	cr3 = DECAF_getPGD(env);
-	if(unpack_cr3 == 0) {
+
+	inContext = (unpack_cr3 == cr3 || virus_cr3 == cr3) && (!DECAF_is_in_kernel(env)); 
+	//inContext = (virus_cr3 == cr3 ) && (!DECAF_is_in_kernel(env)); 
+	if (!inContext)
+		return ;
+	eip = ((CPUArchState *)env->env_ptr)->current_tc;
+	if(eip == 0x409070){
+		//DECAF_printf("insn_begin:%x\n", eip);
+	}
+/*
+	char tmpcurrent_proc[256];
+	memset(tmpcurrent_proc, 0, 256 * sizeof(char));
+	uint32_t tmppid;
+	VMI_find_process_by_cr3_c(cr3, tmpcurrent_proc, sizeof(tmpcurrent_proc), &tmppid);
+	DECAF_printf("insn_begin:%x,program:%s\n", eip, tmpcurrent_proc);
+*/
+	unsigned char insn_buf[4];
+	DECAF_read_mem(env,eip ,sizeof(char)*4,insn_buf);
+	if(eip == 0x40df20){
+		DECAF_printf("insn_begin %x:%x,%x,%x,%x\n", eip, insn_buf[0], insn_buf[1], insn_buf[2], insn_buf[3]);
+	}
+	if(insn_buf[0]==0xc && insn_buf[1]==0 && insn_buf[2]==0 && insn_buf[3]==0){
+		target_ulong v0 = ((CPUArchState *)env->env_ptr)->active_tc.gpr[2];
+		if(v0<6999){
+			char tmp_current_proc[256];
+			memset(tmp_current_proc, 0, 256 * sizeof(char));
+			uint32_t tmp_pid;
+			VMI_find_process_by_cr3_c(cr3, tmp_current_proc, sizeof(tmp_current_proc), &tmp_pid);
+			char * name = syscall_name[v0-4000];
+			if(strcmp(name,"read")==0){
+			
+			}
+			else if(strcmp(name,"connect") == 0 || strcmp(name,"bind") == 0){//(struct sockaddr*)&serv_addr
+				target_ulong a1 = ((CPUArchState *)env->env_ptr)->active_tc.gpr[5];
+				char *tmpBuf = malloc(50*sizeof(char));
+				memset(tmpBuf, 0, 50);
+				DECAF_read_mem(env, a1, 50, tmpBuf);
+				struct sockaddr_in *so = (struct sockaddr_in *)tmpBuf;
+				char * ip = inet_ntoa(so->sin_addr); //reverse of inet_addr
+				int port = ntohs(so->sin_port); //reverse of htonl
+				DECAF_printf("%s/%d insn_begin:%x, syscall:%s, ip:%s, port:%d\n",tmp_current_proc,tmp_pid, eip, name, ip, port);
+				free(tmpBuf);
+			}
+			else if(strcmp(name,"open")==0){
+				target_ulong a0 = ((CPUArchState *)env->env_ptr)->active_tc.gpr[4];
+				char *tmpBuf = malloc(50*sizeof(char));
+				memset(tmpBuf, 0, 50);
+				DECAF_read_mem(env, a0, 50, tmpBuf);
+				DECAF_printf("%s/%d insn_begin:%x, syscall:%s, file:%s\n",tmp_current_proc,tmp_pid, eip, name, tmpBuf);
+				free(tmpBuf);
+			}
+			else if(strcmp(name,"sendto")==0 || strcmp(name,"send")==0 || strcmp(name,"sendmsg")==0){
+				target_ulong a1 = ((CPUArchState *)env->env_ptr)->active_tc.gpr[5];
+				target_ulong a2 = ((CPUArchState *)env->env_ptr)->active_tc.gpr[6];
+				char *tmpBuf = malloc(a2*sizeof(char));
+				memset(tmpBuf, 0, a2);
+				DECAF_read_mem(env, a1, a2, tmpBuf);
+				DECAF_printf("%s/%d insn_begin:%x, syscall:%s, buf:%s, len:%d\n",tmp_current_proc,tmp_pid, eip, name, tmpBuf,a2);
+				free(tmpBuf);
+			}
+			else{
+				DECAF_printf("%s/%d insn_begin:%x, syscall:%s\n",tmp_current_proc,tmp_pid, eip, name);
+			}
+					
+		}
+	}	
+
+}
+
+static void virus_block_begin(DECAF_Callback_Params*dcp)
+{
+	CPUState *env = dcp->bb.env;
+	/*
+	 * check current instruction:
+	 * if it belongs to the examined process, and
+	 * if it is clean, dump the region
+	*/
+	uint32_t eip, cr3; 
+	if(virus_basename[0] == '\0'){
+		return ;
+	}
+
+	cr3 = DECAF_getPGD(env);
+
+	if(virus_cr3 == 0) {
 		char current_proc[256];
 		uint32_t pid;
 
 		VMI_find_process_by_cr3_c(cr3, current_proc, sizeof(current_proc), &pid);
-		if(strcasecmp(current_proc, unpack_basename) != 0)
-		  return ;
-		unpack_cr3 = cr3;
+		if(strcasecmp(current_proc, virus_basename) != 0){
+			return;
+		}
+		virus_cr3 = cr3;
 	}
-	//inContext = (unpack_cr3 == cr3) && (!DECAF_is_in_kernel(env)); 
-	if (!inContext)
-		return ;
-	if(memory_write == 1){
-		memory_write = 0;
-		//DECAF_printf("memory write ins:%x\n", ((CPUArchState *)env->env_ptr)->current_tc);
-	}	
+	inContext = (virus_cr3 == cr3) && (!DECAF_is_in_kernel(env)); 
+	eip = DECAF_getPC(env);
+	if (!inContext){
+		return;
+	}
+
+	char tmp_current_proc[256];
+	memset(tmp_current_proc, 0, 256 * sizeof(char));
+	uint32_t tmp_pid;
+	VMI_find_process_by_cr3_c(cr3, tmp_current_proc, sizeof(tmp_current_proc), &tmp_pid);
+	//DECAF_printf("%s:%x\n", tmp_current_proc, eip);
+/*
+	char modname[512];
+	char functionname[512];
+	if (0 == funcmap_get_name_c(eip, cr3, &modname, &functionname)) {
+		DECAF_printf("function:%s\n", functionname);
+	}
 */
 }
 
@@ -243,25 +348,36 @@ static void unpacker_block_begin(DECAF_Callback_Params*dcp)
 	 * if it is clean, dump the region
 	*/
 	uint32_t eip, cr3; 
-	if(unpack_basename[0] == '\0')
+	if(unpack_basename[0] == '\0'){
 		return ;
+	}
 
 	cr3 = DECAF_getPGD(env);
+
 	if(unpack_cr3 == 0) {
 		char current_proc[256];
 		uint32_t pid;
 
 		VMI_find_process_by_cr3_c(cr3, current_proc, sizeof(current_proc), &pid);
-		if(strcasecmp(current_proc, unpack_basename) != 0)
-		  return ;
+		if(strcasecmp(current_proc, unpack_basename) != 0){
+			return;
+		}
 		unpack_cr3 = cr3;
 	}
-	inContext = (unpack_cr3 == cr3) && (!DECAF_is_in_kernel(dcp->ib.env)); 
+	inContext = (unpack_cr3 == cr3) && (!DECAF_is_in_kernel(env)); 
 	eip = DECAF_getPC(env);
-	if (!inContext)
-		return ;
+	if (!inContext){
+		return;
+	}
 
-/* Changed by Aravind: arprakas@syr.edu */
+	char tmp_current_proc[256];
+	memset(tmp_current_proc, 0, 256 * sizeof(char));
+	uint32_t tmp_pid;
+	VMI_find_process_by_cr3_c(cr3, tmp_current_proc, sizeof(tmp_current_proc), &tmp_pid);
+	if(tmp_current_proc){				
+		//DECAF_printf("%s block begin, pc:%x,cr3:%x\n", tmp_current_proc, eip, cr3);
+	}	
+
     	uint64_t mybitmap=0;
     	mybitmap=check_mem_mark(eip,1);
     	if(mybitmap>0){
@@ -272,13 +388,14 @@ static void unpacker_block_begin(DECAF_Callback_Params*dcp)
     		dump_unpacked_code();
     		cur_version++;
     	}
-
     	return ;
 }
+
 //change add
 static void unpacker_module_loaded(VMI_Callback_Params *pcp)
 //change end
 {
+
 	//uint32_t pid=pcp->lm.pid;
 	//char *name=pcp->lm.name;
 	uint32_t base=pcp->lm.base;
@@ -292,11 +409,13 @@ static void unpacker_module_loaded(VMI_Callback_Params *pcp)
       }
    }
    fprintf(unpacker_log, "clean virt_page=%08x, size = %d \n", virt_page, size);
+
 }
 
 
 static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 {
+
 	// DECAF change
 	uint32_t virt_addr;//,phys_addr;
 	int size;
@@ -305,7 +424,7 @@ static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 	size=dcp->mw.dt;
 	//end
 	//DECAF_printf("write virtual addr:%x\n", virt_addr);
-    /* Changed by Aravind: arprakas@syr.edu */
+
 	if(inContext) {
 		memory_write = 1;
 		set_mem_mark(virt_addr,size,(1<<size)-1);
@@ -324,7 +443,7 @@ void unregister_callbacks()
 		DECAF_unregister_callback(DECAF_BLOCK_BEGIN_CB,block_begin_cb_handle);
 	}
 	if(insn_end_cb_handle){
-		DECAF_unregister_callback(DECAF_INSN_END_CB,insn_end_cb_handle);
+		//DECAF_unregister_callback(DECAF_INSN_END_CB,insn_end_cb_handle);
 	}
 	if(mem_write_cb_handle){
 		DECAF_printf("DECAF_unregister_callback(DECAF_MEM_WRITE_CB,mem_write_cb_handle);\n");
@@ -353,18 +472,33 @@ static void unpacker_cleanup()
 	if(unpacker_log) fclose(unpacker_log);
 }
 
-
+int count = 0;
 static void unpacker_loadmainmodule_notify(VMI_Callback_Params *vcp)
 {
 		uint32_t pid=vcp->cp.pid;
 		char *name=vcp->cp.name;
+		int cr3 = VMI_find_cr3_by_pid_c(pid);
+
+		if((strlen(name)==15 || strlen(name)==12) && strcmp(name, "UPDATELEASES.sh")!=0 && strcmp(name, "updateleases")!=0){
+			count ++;
+			DECAF_printf("new program:%s,cr3:%x\n",name,cr3);
+			if(count == 2){ // decide different case when equals 2, crash.
+				memset(virus_basename, 0, 256*sizeof(char));
+				strcpy(virus_basename, name);
+				virus_cr3 = cr3;
+				if(!virus_block_begin_cb_handle){
+					virus_block_begin_cb_handle=DECAF_register_callback(DECAF_BLOCK_BEGIN_CB,virus_block_begin,NULL);
+					DECAF_printf("DECAF_register_callback(VIRUS_DECAF_BLOCK_BEGIN_CB)\n");
+				}
+			}
+		}
+
 
 		if(unpack_basename[0] != 0) {
 			if(strcasecmp(name, unpack_basename)==0) {
 				DECAF_printf("loadmainmodule_notify called, %s\n", name);
 
 				monitored_pid = pid;
-				//unpack_cr3=find_cr3(pid);
 				unpack_cr3 = VMI_find_cr3_by_pid_c(pid);
 				if(!block_begin_cb_handle){
 					block_begin_cb_handle=DECAF_register_callback(DECAF_BLOCK_BEGIN_CB,unpacker_block_begin,NULL);
@@ -372,8 +506,8 @@ static void unpacker_loadmainmodule_notify(VMI_Callback_Params *vcp)
 				}
 
 				if(!insn_end_cb_handle){
-					//insn_end_cb_handle=DECAF_register_callback(DECAF_INSN_END_CB, unpacker_insn_end, NULL);
-					DECAF_printf("DECAF_register_callback(DECAF_INSN_END_CB) pid=%d\n",pid);
+					insn_end_cb_handle=DECAF_register_callback(DECAF_INSN_BEGIN_CB, unpacker_insn_begin, NULL);
+					DECAF_printf("DECAF_register_callback(DECAF_INSN_BEGIN_CB) pid=%d\n",pid);
 
 				}
 
@@ -402,22 +536,42 @@ static void unpacker_removeproc_notify(VMI_Callback_Params *vcp)
 
 plugin_interface_t * init_plugin()
 {
-  unpack_basename[0] = '\0';
-  if (!(unpacker_log = fopen("unpack.log", "w"))) {
+	unpack_basename[0] = '\0';
+	virus_basename[0] = '\0';
+	if (!(unpacker_log = fopen("unpack.log", "w"))) {
 	printf("Unable to open unpack.log for writing!\n");
 	return NULL;
-  }
-  mem_mark_init();
+	}
+	mem_mark_init();
+	DECAF_output_init(NULL);
+//syscall parser
+	xmlDoc *document;
+	xmlNode *root, *first_child, *node;
+	char *filename = "syscall.xml";
+	document = xmlReadFile(filename, NULL, 0);
+	root = xmlDocGetRootElement(document);
+	first_child = root->children;
+	for (node = first_child; node; node = node->next) {
+		xmlAttr* attribute = node->properties;
+		if(attribute && attribute->name && attribute->children){
+			xmlChar *name = xmlNodeListGetString(node->doc, attribute->children,1);
+			attribute = attribute->next;
+			xmlChar *id = xmlNodeListGetString(node->doc, attribute->children,1);
+			int index = atoi(id) - 4000;
+			syscall_name[index] = malloc(sizeof(char) * 100);
+			strcpy(syscall_name[index], name);
+		}
+	}
 
-  //change to
-  unpacker_interface.mon_cmds=unpacker_term_cmds;
-  unpacker_interface.plugin_cleanup=unpacker_cleanup;
-  proc_loadmodule_cb_handle=VMI_register_callback(VMI_LOADMODULE_CB,unpacker_module_loaded,&should_monitor);
-  proc_loadmainmodule_cb_handle=VMI_register_callback(VMI_CREATEPROC_CB,unpacker_loadmainmodule_notify,&should_monitor);
-  proc_processend_cb_handle=VMI_register_callback(VMI_REMOVEPROC_CB,unpacker_removeproc_notify,&should_monitor);
-    //change end
+	//change to
+	unpacker_interface.mon_cmds=unpacker_term_cmds;
+	unpacker_interface.plugin_cleanup=unpacker_cleanup;
+	proc_loadmodule_cb_handle=VMI_register_callback(VMI_LOADMODULE_CB,unpacker_module_loaded,&should_monitor);
+	proc_loadmainmodule_cb_handle=VMI_register_callback(VMI_CREATEPROC_CB,unpacker_loadmainmodule_notify,&should_monitor);
+	proc_processend_cb_handle=VMI_register_callback(VMI_REMOVEPROC_CB,unpacker_removeproc_notify,&should_monitor);
+	//change end
 
-  return &unpacker_interface;
+	return &unpacker_interface;
 }
 
 

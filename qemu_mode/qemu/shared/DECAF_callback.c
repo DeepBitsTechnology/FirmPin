@@ -932,7 +932,7 @@ POP_ALL()
 
 }
 
-void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env)
+void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env, gva_t PC)
 {
 	static callback_struct_t *cb_struct, *cb_temp;
 	static DECAF_Callback_Params params;
@@ -946,6 +946,7 @@ void helper_DECAF_invoke_insn_begin_callback(CPUArchState* env)
 #elif defined(TARGET_ARM)
 	ARMCPU *cpu = arm_env_get_cpu(env);
 #elif defined(TARGET_MIPS)
+	env->current_tc = PC;
 	MIPSCPU *cpu = mips_env_get_cpu(env);
 #else
   fix this error
