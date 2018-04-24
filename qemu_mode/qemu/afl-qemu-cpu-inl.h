@@ -616,11 +616,12 @@ static target_ulong doneWork(target_ulong val)
 
 static struct timeval snap_time;
 
-target_ulong afl_endWork(int saved_vm_running)
+target_ulong afl_endWork(int saved_vm_running, int stat)
 {
 // need reload vmi, reset afl data.
     int status = 0; //?WEXITSTATUS;
     static unsigned char tmp[4];
+    status = stat;
 //exit
 /*
     int pid = fork();
@@ -628,7 +629,9 @@ target_ulong afl_endWork(int saved_vm_running)
     waitpid(pid, &status, 0);
     printf("status is %x\n", status);
 */
-    //DECAF_printf("write status\n");
+
+
+//write status crash or not?
     if (write(FORKSRV_FD + 1, &status, 4) != 4) exit(7);
 //restart from parent
     if (uninterrupted_read(FORKSRV_FD, tmp, 4) != 4) exit(2);

@@ -184,8 +184,8 @@ void check_ret(DECAF_Callback_Params *param)
 			for(int i=0;i< stack_top;i++){
 				DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
 			}
-			DECAF_printf("checke ret done work\n");
-			doneWork(32);
+			//DECAF_printf("checke ret done work\n");
+			endWork(32);
 		}
 	}
 	
@@ -200,7 +200,7 @@ void stopWork(){
 	afl_fork = 0;
 	targetpid[1]=0;
 	targetcr3[1]=0;	
-	endWork();
+	endWork(0);
 }
 
 static void do_block_begin(DECAF_Callback_Params* param)
@@ -239,19 +239,39 @@ static void do_block_begin(DECAF_Callback_Params* param)
 	//0x76f4f144 0x77b62a2c 0x77cbfa00
 	if(pc == 0x401c70 || pc == 0x401c7c || pc > 0x80000000)
 		return;
-	if(strcmp(cur_process, "hedwig.cgi") == 0)
+
+	if(strcmp(cur_process, "hedwig.cgi") == 0) 
+	{
+
+		if(pc  == 0x419610){//select
+			//target_ulong s7 = cpu->active_tc.gpr[23];//timeout
+			target_ulong sp = cpu->active_tc.gpr[29];//sp
+			target_ulong sp_10 = sp + 0x10;//timeout the fifth arg
+			target_ulong time_addr;
+			struct timeval time;
+			DECAF_read_mem(param->bb.env, sp_10, sizeof(target_ulong), &time_addr);
+			//DECAF_read_mem(param->bb.env, time_addr, sizeof(struct timeval), &time);
+			//DECAF_printf("cur_pro:%s, function:%s, pc:%x, time:%d,%d\n", cur_process, functionname, pc, time.tv_sec, time.tv_usec);
+			time.tv_sec = 0;
+			time.tv_usec = 0;
+			DECAF_write_mem(param->bb.env, time_addr, sizeof(struct timeval), &time);
+			DECAF_printf("cur_pro:%s, function:%s, pc:%x, time:%d,%d\n", cur_process, functionname, pc, time.tv_sec, time.tv_usec);
+		}
 		return;
-	//DECAF_printf("pc is %x\n", pc);
+
+	}
 	if (0 == funcmap_get_name_c(pc, pgd, &modname, &functionname)) {
-		
-		//DECAF_printf("functiona %s\n", functionname);
+/*		
+		if(strstr(functionname, "dl") == NULL){
+			DECAF_printf("pro:%s, functiona %s,\n", cur_process, functionname);
+		}
+*/
 		if(strcmp(functionname, "__libc_accept") == 0 ) //strcmp(functionname, "accept") == 0 || 
 		{
 			gettimeofday(&tv_api, NULL);
 			accept_block = 1;
 			DECAF_printf("cur_pro:%s, function:%s, pc:%x, time:%d,%d\n", cur_process, functionname, pc, tv_api.tv_sec, tv_api.tv_usec);	
 		}
-
 		else if(strcmp(functionname, "execve") == 0 || strcmp(functionname, "spawn") == 0){
 
 			target_ulong a0 = cpu->active_tc.gpr[4];//path
@@ -559,7 +579,7 @@ static void callbacktests_removeproc_callback(VMI_Callback_Params* params)
 			int ret = setitimer(ITIMER_REAL, &tick, NULL);  
 			if(ret) DECAF_printf("cancel timer failed\n");
 
-			endWork();
+			endWork(0);
 		}
 	}
 

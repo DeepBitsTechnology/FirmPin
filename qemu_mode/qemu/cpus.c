@@ -1881,11 +1881,19 @@ target_ulong startCreatesnapshot(CPUArchState *env, target_ulong enableTicks)
 	return 0; 
 }
 
-target_ulong endWork()
+target_ulong endWork(target_ulong status)
 {
-	if(write(afl_qemuloop_pipe[1], "END", 4) != 4)
-	{
-	    perror("write afl_qemuloop_pip");
+	if(status == 0){
+		if(write(afl_qemuloop_pipe[1], "END", 4) != 4)
+		{
+		    perror("write afl_qemuloop_pip");
+		}
+	}
+	else if(status == 32){
+		if(write(afl_qemuloop_pipe[1], "CRA", 4) != 4)
+		{
+		    perror("write afl_qemuloop_pip");
+		}
 	}
 	//sleep(1);
 	//qemu_mutex_unlock_iothread();
@@ -1949,7 +1957,7 @@ gotPipeNotification(void *ctx)
     }else if(strcmp(buf, "END") == 0){
 	print_start = 0;
 //record the path pc
-/*
+
 	char filename[1000];
 	char * rootdir = "/home/zyw/experiment/TriforceAFL_new/tmp/";
 	char * orig_data_trim = trim(orig_data);
@@ -1967,12 +1975,18 @@ gotPipeNotification(void *ctx)
 		fprintf(fp, "%x\n", print_pc[i]);
 	}
 	fclose(fp);
-*/
+
 //
 	print_index = 0;
 	DECAF_printf("afl stop snapshot\n");
 	
-	afl_endWork(saved_vm_running);
+	afl_endWork(saved_vm_running, 0);
+    }
+    else if(strcmp(buf, "CRA") == 0){
+	print_start = 0;
+	print_index = 0;
+	DECAF_printf("afl stop crash snapshot\n");	
+	afl_endWork(saved_vm_running, 32);
     }
     else{
 	DECAF_printf("afl what:%s\n");
