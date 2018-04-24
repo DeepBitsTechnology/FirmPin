@@ -138,6 +138,7 @@ static void init_delay_params(SyncClocks *sc, const CPUState *cpu)
 #endif /* CONFIG USER ONLY */
 
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
+static int next_output = 1;
 static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 {
     CPUArchState *env = cpu->env_ptr;
@@ -166,7 +167,11 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 
     cpu->can_do_io = !use_icount;
     target_ulong pc = env->active_tc.PC; //zyw mips
+    if(aflStart == 2){
+	DECAF_printf("zyw tcg_qemu_tb_exec\n");
+    }
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    if(aflStart == 2) DECAF_printf("after tcg_qemu_tb_exec:%x,ret: %x\n", tb_ptr, ret);
     cpu->can_do_io = 1;
     last_tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     tb_exit = ret & TB_EXIT_MASK;
@@ -190,17 +195,39 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
             cc->set_pc(cpu, last_tb->pc);
         }
     }
-//zyw
+//zyw fix
 
     else
-    {
-	AFL_QEMU_CPU_SNIPPET2(env, pc);
-    }
+    {	
+	if(next_output)
+	{	
+		if(aflStart){
+			target_ulong pgd = DECAF_getPGD(cpu);
+			char cur_process[512];
+			int pid;
+			VMI_find_process_by_cr3_c(pgd, cur_process, 512, &pid);
+			if(strcmp(cur_process, "hedwig.cgi") == 0){
+				AFL_QEMU_CPU_SNIPPET2(env, pc);
+			}
+		}
+	}
+	else
+	{
+		next_output = 1;
+	}
+	if(ret == 0) //zyw solve multiple path problem
+	{
+		next_output = 0;
+	}
 
+    }
+/*
     if(afl_wants_cpu_to_stop){
+	DECAF_printf("cpu-exec, exit_request\n");
 	cpu->exit_request = 1;
 	
     }
+*/
 //zyw
     return ret;
 }
@@ -380,7 +407,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
             if (!tb) {
                 /* if no translated code available, then translate it now */
                 tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
-		AFL_QEMU_CPU_SNIPPET1; //zyw
+		//AFL_QEMU_CPU_SNIPPET1; //zyw
             }
 
             mmap_unlock();
@@ -389,6 +416,9 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         /* We add the TB in the virtual pc hash table for the fast lookup */
         atomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);
     }
+
+#ifdef NOPE_NOT_NEVER 
+
 #ifndef CONFIG_USER_ONLY
     /* We don't take care of direct jumps when address mapping changes in
      * system emulation. So it's not safe to make a direct jump to a TB
@@ -400,7 +430,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 #endif
 //zyw
 
-#ifdef NOPE_NOT_NEVER 
+
     /* See if we can patch the calling TB. */
     if (last_tb && !qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
         if (!have_tb_lock) {
@@ -418,6 +448,15 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     }
     return tb;
 }
+
+
+TranslationBlock *afl_tb_find(CPUState *cpu,
+                                        TranslationBlock *last_tb,
+                                        int tb_exit)
+{
+	tb_find(cpu, last_tb, tb_exit);
+}
+
 
 static inline bool cpu_handle_halt(CPUState *cpu)
 {
@@ -506,11 +545,11 @@ static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
     return false;
 }
 
+extern int flagg;
 static inline bool cpu_handle_interrupt(CPUState *cpu,
                                         TranslationBlock **last_tb)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
-
     if (unlikely(atomic_read(&cpu->interrupt_request))) {
         int interrupt_request;
         qemu_mutex_lock_iothread();
@@ -519,6 +558,7 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
             /* Mask out external interrupts for this step. */
             interrupt_request &= ~CPU_INTERRUPT_SSTEP_MASK;
         }
+	//if (flagg == 2) DECAF_printf("interrupt:%x\n", interrupt_request);
         if (interrupt_request & CPU_INTERRUPT_DEBUG) {
             cpu->interrupt_request &= ~CPU_INTERRUPT_DEBUG;
             cpu->exception_index = EXCP_DEBUG;
@@ -594,17 +634,19 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 {
     uintptr_t ret;
     int32_t insns_left;
-
     trace_exec_tb(tb, tb->pc);
+    CPUArchState *env = cpu->env_ptr;
+    if(aflStart ==2)  DECAF_printf("\n\nbefore cpu_tb_exec, pc:%x\n", tb->pc);
     ret = cpu_tb_exec(cpu, tb);
     tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     *tb_exit = ret & TB_EXIT_MASK;
+    if(aflStart ==2) DECAF_printf("after cpu_tb_exec:%x, exit:%x\n",ret, *tb_exit);
     if (*tb_exit != TB_EXIT_REQUESTED) {
         *last_tb = tb;
         return;
     }
-
     *last_tb = NULL;
+    
     insns_left = atomic_read(&cpu->icount_decr.u32);
     atomic_set(&cpu->icount_decr.u16.high, 0);
     if (insns_left < 0) {
@@ -619,7 +661,6 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
         smp_mb();
         return;
     }
-
     /* Instruction counter expired.  */
     assert(use_icount);
 #ifndef CONFIG_USER_ONLY
@@ -640,6 +681,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 #endif
 }
 
+extern int flagg;
 /* main execution loop */
 
 int cpu_exec(CPUState *cpu)
@@ -654,18 +696,18 @@ int cpu_exec(CPUState *cpu)
     if (cpu_handle_halt(cpu)) {
         return EXCP_HALTED;
     }
-
+    if(flagg ==2) DECAF_printf("loop2.631\n");
     rcu_read_lock();
 
     cc->cpu_exec_enter(cpu);
-
+    if(flagg == 2) DECAF_printf("loop2.632\n");
     /* Calculate difference between guest clock and host clock.
      * This delay includes the delay of the last cycle, so
      * what we have to do is sleep until it is 0. As for the
      * advance/delay we gain here, we try to fix it next time.
      */
     init_delay_params(&sc, cpu);
-
+    if(flagg == 2) DECAF_printf("loop2.633\n");
     /* prepare setjmp context for exception handling */
     if (sigsetjmp(cpu->jmp_env, 0) != 0) {
 #if defined(__clang__) || !QEMU_GNUC_PREREQ(4, 6)
@@ -686,23 +728,28 @@ int cpu_exec(CPUState *cpu)
             qemu_mutex_unlock_iothread();
         }
     }
-
     /* if an exception is pending, we execute it here */
     while (!cpu_handle_exception(cpu, &ret)) {
         TranslationBlock *last_tb = NULL;
         int tb_exit = 0;
-
         while (!cpu_handle_interrupt(cpu, &last_tb)) {
+	    if(aflStart ==2) DECAF_printf("loop start\n");
+	    if(aflStart ==2 && last_tb) DECAF_printf("last_tb:%x\n",last_tb->pc);
             TranslationBlock *tb = tb_find(cpu, last_tb, tb_exit);
+	    if(aflStart ==2 && tb) DECAF_printf("tb:%x,tb_size:%d, exit:%x,JMP:%x,%x\n",tb->pc, tb->size, tb_exit, tb->jmp_list_next[0], tb->jmp_list_next[1]);
             cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
+	    if(aflStart ==2 && last_tb) DECAF_printf("exec_last_tb:%x\n",last_tb->pc);
+	    //if(flagg == 1) DECAF_printf("loop2.6343\n");
             /* Try to align the host and virtual clocks
                if the guest is in advance */
             align_clocks(&sc, cpu);
+	    if(aflStart ==2) DECAF_printf("loop end\n\n");
         }
     }
-
+    if(flagg == 2) DECAF_printf("loop2.635\n");
     cc->cpu_exec_exit(cpu);
     rcu_read_unlock();
-
+    if(flagg == 2) DECAF_printf("loop2.635\n");
+    	
     return ret;
 }
