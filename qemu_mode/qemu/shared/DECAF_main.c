@@ -616,7 +616,7 @@ extern void function_map_init(void);
 
 void DECAF_init(void) {
 	DECAF_callback_init();
-	tainting_init();
+	//tainting_init();
 	//DECAF_virtdev_init();
 	// AWH - change in API, added NULL as first parm
 	/* Aravind - NOTE: DECAF_save *must* be called before function_map_save and DECAF_load must be called
@@ -624,8 +624,8 @@ void DECAF_init(void) {
 	 * This is because, TEMU_load restores guest.log, which is read into function map.
 	 */
 	//zyw
-
-	register_savevm_live(NULL, "DECAF", 0, 1, DECAF_save, NULL );
+	//? need comment?
+	//register_savevm_live(NULL, "DECAF", 0, 1, DECAF_save, NULL );
 	//register_savevm(NULL, "DECAF", 0, 1, DECAF_save, DECAF_load, NULL );
 	DECAF_vm_compress_init();
 	function_map_init();
