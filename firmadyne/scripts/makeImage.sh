@@ -66,7 +66,8 @@ if [ ! -e "${WORK_DIR}/${IID}.tar.gz" ]; then
 fi
 
 echo "----Creating QEMU Image----"
-qemu-img create -f raw "${IMAGE}" 1G
+#qemu-img create -f raw "${IMAGE}" 1G
+../qemu_mode/qemu/qemu-img create -f raw "${IMAGE}" 1G  #zyw
 chmod a+rw "${IMAGE}"
 
 echo "----Creating Partition Table----"
@@ -102,10 +103,13 @@ mkdir "${IMAGE_DIR}/firmadyne/libnvram.override/"
 echo "----Patching Filesystem (chroot)----"
 cp $(which busybox) "${IMAGE_DIR}"
 cp "${SCRIPT_DIR}/fixImage.sh" "${IMAGE_DIR}"
-cp  -a "${FIRMWARE_DIR}/../FILE_LOAD/." "${IMAGE_DIR}/FILE_LOAD/"
+cp  -a "${FIRMWARE_DIR}/../FILE_LOAD/." "${IMAGE_DIR}/FILE_LOAD/" ##D-link router
+mv "${IMAGE_DIR}/FILE_LOAD/wifi.php" "${IMAGE_DIR}/etc/services/WIFI/wifi.php" ##D-link router
 chroot "${IMAGE_DIR}" /busybox ash /fixImage.sh
 rm "${IMAGE_DIR}/fixImage.sh"
 rm "${IMAGE_DIR}/busybox"
+rm "${IMAGE_DIR}/etc/init.d/S45gpiod.sh" ##D-link router
+
 
 echo "----Setting up FIRMADYNE----"
 cp "${CONSOLE}" "${IMAGE_DIR}/firmadyne/console"
