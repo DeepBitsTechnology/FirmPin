@@ -25,15 +25,22 @@
    have a look at afl-showmap.c.
 
  */
+#include "qemu/osdep.h"
+#include "cpu.h"
 
 #include <sys/shm.h>
 #include "afl.h"
 #include "../../config.h"
 #include <time.h>
 
+char *current_data = NULL;
+char *orig_data = NULL;
+int print_start = 0;
+int print_index = 0;
+int print_pc[1000];
 //zyw
 static u_long bufsz;
-static char *buf;
+static char *buf; //zyw
 static u_int64_t *arr;
 #define SZ 4096
 
@@ -45,15 +52,21 @@ static u_int64_t *arr;
    we have hit a new block that hasn't been translated yet, and to tell
    it to translate within its own context, too (this avoids translation
    overhead in the next forked-off copy). */
-
+/*
 #define AFL_QEMU_CPU_SNIPPET1 do { \
     afl_request_tsl(pc, cs_base, flags); \
+  } while (0)
+*/
+
+#define AFL_QEMU_CPU_SNIPPET1 do { \
+    afl_request_tsl(cpu, last_tb, tb_exit); \
   } while (0)
 
 /* This snippet kicks in when the instruction pointer is positioned at
    _start and does the usual forkserver stuff, not very different from
    regular instrumentation injected via afl-as.h. */
 
+/*
 #define AFL_QEMU_CPU_SNIPPET2(env, pc) do { \
     if(pc == afl_entry_point && pc && getenv("AFLGETWORK") == 0) { \
       afl_setup(); \
@@ -62,7 +75,11 @@ static u_int64_t *arr;
     } \
     afl_maybe_log(pc); \
   } while (0)
+*/
 
+#define AFL_QEMU_CPU_SNIPPET2(env, pc) do { \
+    afl_maybe_log(pc); \
+  } while (0)
 
 /* We use one additional file descriptor to relay "needs translation"
    messages between the child and the fork server. */
@@ -106,20 +123,42 @@ static unsigned int afl_inst_rms = MAP_SIZE;
 static inline void afl_maybe_log(target_ulong);
 
 static void afl_wait_tsl(CPUArchState*, int);
-static void afl_request_tsl(target_ulong, target_ulong, uint64_t);
-
+//static void afl_request_tsl(target_ulong, target_ulong, uint64_t);
+static void afl_request_tsl(CPUState *, TranslationBlock *, int);
+//zyw
+/*
 static TranslationBlock *tb_find_slow(CPUArchState*, target_ulong,
                                       target_ulong, uint64_t);
+*/
+/*
+static TranslationBlock *tb_find_slow(CPUState*, TranlationBlock *,
+                                      int );
+*/
+
+TranslationBlock *afl_tb_find(CPUState *cpu,
+                                        TranslationBlock *last_tb,
+                                        int tb_exit);
 
 
 /* Data structure passed around by the translate handlers: */
-
+/*
 struct afl_tsl {
   target_ulong pc;
   target_ulong cs_base;
   uint64_t flags;
 };
+*/
 
+struct afl_tsl {
+  CPUState * cpu;
+  TranslationBlock *last_tb;
+  int tb_exit;
+};
+
+
+extern target_ulong startCreatesnapshot(CPUArchState *env, target_ulong enableTicks);
+extern target_ulong endWork();
+extern target_ulong startFork(CPUArchState *env, target_ulong enableTicks);
 
 /*************************
  * ACTUAL IMPLEMENTATION *
@@ -151,7 +190,7 @@ void afl_setup(void) {
 
     shm_id = atoi(id_str);
     afl_area_ptr = shmat(shm_id, NULL, 0);
-
+    
     if (afl_area_ptr == (void*)-1) exit(1);
 
     /* With AFL_INST_RATIO set to a low value, we want to touch the bitmap
@@ -168,7 +207,6 @@ void afl_setup(void) {
     afl_end_code   = (target_ulong)-1;
 
   }
-
 }
 
 static ssize_t uninterrupted_read(int fd, void *buf, size_t cnt)
@@ -211,11 +249,13 @@ void afl_forkserver(CPUArchState *env) {
     close(t_fd[1]);
     struct timeval tv_start;
     gettimeofday(&tv_start,NULL);
+    DECAF_printf("before fork process\n");
     child_pid = fork();
     
     if (child_pid < 0) exit(4);
 
     if (!child_pid) {
+      DECAF_printf("in child process\n");
       struct timeval tv_end;
       gettimeofday(&tv_end,NULL);
       ////DECAF_printf("fork time is %f\n", (tv_end.tv_sec - tv_start.tv_sec) + ((float)(tv_end.tv_usec - tv_start.tv_usec))/1000000);
@@ -244,9 +284,7 @@ void afl_forkserver(CPUArchState *env) {
 
     if (waitpid(child_pid, &status, 0) < 0) exit(6);
     if (write(FORKSRV_FD + 1, &status, 4) != 4) exit(7);
-    struct timeval child_end;
-    gettimeofday(&child_end,NULL);
-   //// DECAF_printf("child time is %f\n",  (child_end.tv_sec - tv_start.tv_sec) + ((float)(child_end.tv_usec - tv_start.tv_usec))/1000000);
+
   }
 
 }
@@ -262,6 +300,12 @@ static inline target_ulong aflHash(target_ulong cur_loc)
   if (cur_loc > afl_end_code || cur_loc < afl_start_code || !afl_area_ptr)
     return 0;
 
+  //DECAF_printf("exec %lx\n", cur_loc); //zyw
+  if(print_start == 1){
+  	//DECAF_printf("exec %lx\n", cur_loc); //zyw path information
+	print_pc[print_index] = cur_loc;
+	print_index++;
+  }
 #ifdef DEBUG_EDGES
   if(1) {
     printf("exec %lx\n", cur_loc);
@@ -300,7 +344,6 @@ static inline target_ulong aflHash(target_ulong cur_loc)
 /* todo: generate calls to helper_aflMaybeLog during translation */
 static inline void helper_aflMaybeLog(target_ulong cur_loc) {
   static __thread target_ulong prev_loc;
-
   afl_area_ptr[cur_loc ^ prev_loc]++;
   prev_loc = cur_loc >> 1;
 }
@@ -319,12 +362,13 @@ static inline void afl_maybe_log(target_ulong cur_loc) {
    we tell the parent to mirror the operation, so that the next fork() has a
    cached copy. */
 
+/*
 static void afl_request_tsl(target_ulong pc, target_ulong cb, uint64_t flags) {
 
   struct afl_tsl t;
 
   if (!afl_fork_child) return;
-
+  //DECAF_printf("afl_request_tsl\n");
   t.pc      = pc;
   t.cs_base = cb;
   t.flags   = flags;
@@ -333,6 +377,22 @@ static void afl_request_tsl(target_ulong pc, target_ulong cb, uint64_t flags) {
     return;
 
 }
+*/
+
+static void afl_request_tsl(CPUState* cpu, TranslationBlock *last_tb, int tb_exit)
+{
+  struct afl_tsl t;
+
+  if (!afl_fork_child) return;
+  t.cpu = cpu;
+  t.last_tb = last_tb;
+  t.tb_exit = tb_exit;
+  //DECAF_printf("reqeust_tsl, %x\n", last_tb);
+  if (write(TSL_FD, &t, sizeof(struct afl_tsl)) != sizeof(struct afl_tsl))
+    return;
+
+}
+
 
 
 /* This is the other side of the same channel. Since timeouts are handled by
@@ -341,30 +401,38 @@ static void afl_request_tsl(target_ulong pc, target_ulong cb, uint64_t flags) {
 static void afl_wait_tsl(CPUArchState *env, int fd) {
 
   struct afl_tsl t;
-
   while (1) {
 
     /* Broken pipe means it's time to return to the fork server routine. */
 
     if (read(fd, &t, sizeof(struct afl_tsl)) != sizeof(struct afl_tsl))
       break;
-
-    if(0 && env) {
+    CPUArchState * env =  (CPUArchState *)t.cpu->env_ptr;
+    int c_pc = env->active_tc.PC;
+    //DECAF_printf("afl  wait tsl:%x\n", c_pc);
+    if(env && 0) {
 #ifdef CONFIG_USER_ONLY
-        tb_find_slow(env, t.pc, t.cs_base, t.flags);
+        //tb_find_slow(env, t.pc, t.cs_base, t.flags);
 #else
+	
         /* if the child system emulator pages in new code and then JITs it, 
         and sends its address to the server, the server cannot also JIT it 
         without having it's guest's kernel page the data in !  
         so we will only JIT kernel code segment which shouldnt page.
         */
         // XXX this monstrosity must go!
-        if(t.pc >= 0xffffffff81000000 && t.pc <= 0xffffffff81ffffff) {
+        //if(t.pc >= 0xffffffff81000000 && t.pc <= 0xffffffff81ffffff) {
+
+	//if(c_pc >= 0x81000000 && c_pc<= 0x81ffffff) {
+	if(c_pc >= 0x80000000 && c_pc < 0x90000000) {
+	    //DECAF_printf("afl-qemu-cpu-inl:%x,%x\n", t.last_tb, c_pc);
             //printf("wait_tsl %lx -- jit\n", t.pc); fflush(stdout);
-            tb_find_slow(env, t.pc, t.cs_base, t.flags);
+            //tb_find_slow(env, t.pc, t.cs_base, t.flags);
+	     afl_tb_find(t.cpu, t.last_tb, t.tb_exit);
         } else {
             //printf("wait_tsl %lx -- ignore nonkernel\n", t.pc); fflush(stdout);
         }
+
 #endif
     } else {
         //printf("wait_tsl %lx -- ignore\n", t.pc); fflush(stdout);
@@ -375,6 +443,46 @@ static void afl_wait_tsl(CPUArchState *env, int fd) {
   close(fd);
 
 }
+
+void afl_createsnapshot(CPUArchState *env, target_ulong enableTicks)
+{
+
+	static unsigned char tmp[4];
+	//DECAF_printf("forkserver:%d\n", afl_area_ptr);
+	if (!afl_area_ptr) return;
+	/* Tell the parent that we're alive. If the parent doesn't want
+	to talk, assume that we're not running in forkserver mode. */
+
+	if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
+
+	/* All right, let's await orders... */
+	//DECAF_printf("startCreatesnapshot1 over\n");
+	if (uninterrupted_read(FORKSRV_FD, tmp, 4) != 4) exit(2);
+	//DECAF_printf("startCreatesnapshot2 over\n");
+
+// save snapshot
+	Error *err = NULL;
+	const char *snapshot_name = "decaf_snap";
+	save_snapshot(snapshot_name, &err);
+
+//
+	//DECAF_printf("startCreatesnapshot3 over\n");
+	//hmp_handle_error(cur_mon, &err);
+	
+	print_start = 1;
+
+	afl_forksrv_pid = getpid() + 1;
+	if (write(FORKSRV_FD + 1, &afl_forksrv_pid, 4) != 4) exit(5);
+
+	DECAF_printf("afl create snapshot\n");
+
+
+	return 0;
+}
+
+
+
+
 
 
 static target_ulong startForkserver(CPUArchState *env, target_ulong enableTicks)
@@ -394,7 +502,7 @@ static target_ulong startForkserver(CPUArchState *env, target_ulong enableTicks)
      * N.B. We assume a single cpu here!
      */
     //DECAF_printf("config_system\n");
-    aflEnableTicks = enableTicks;
+    aflEnableTicks = enableTicks; //zyw
     afl_wants_cpu_to_stop = 1;
     //set_afl_wants_cpu_to_stop();
    
@@ -410,10 +518,11 @@ static target_ulong getWork(CPUArchState *env, char * ptr, target_ulong sz)
     unsigned char ch;
     //printf("pid %d: getWork %lx %lx\n", getpid(), ptr, sz);fflush(stdout);
     //assert(aflStart == 0);
-    //DECAF_printf("filename:%s\n",filename);
+    //DECAF_printf("filename:%s\n",aflFile);
     fp = fopen(aflFile, "rb");
     if(!fp) {
          perror(aflFile);
+	 DECAF_printf("aflFile open failed\n");
          return errno;
     }
     retsz = 0;
@@ -421,6 +530,30 @@ static target_ulong getWork(CPUArchState *env, char * ptr, target_ulong sz)
         if(fread(&ch, 1, 1, fp) == 0)
             break;
         //cpu_stb_data(env, ptr, ch);
+	//DECAF_printf("ch:%c\n",ch);
+	*ptr = ch;
+        retsz ++;
+        ptr ++;
+    }
+    fclose(fp);
+    return retsz;
+}
+
+static target_ulong readFile(char * filename, char *ptr, target_ulong sz)
+{
+    target_ulong retsz;
+    FILE *fp;
+    unsigned char ch;
+    fp = fopen(filename, "rb");
+    if(!fp) {
+	 DECAF_printf("aflFile open failed\n");
+         return errno;
+    }
+    retsz = 0;
+    while(retsz < sz) {
+        if(fread(&ch, 1, 1, fp) == 0)
+            break;
+
 	*ptr = ch;
         retsz ++;
         ptr ++;
@@ -447,12 +580,21 @@ static target_ulong startWork(CPUArchState *env, target_ulong ptr)
 }
 */
 
-static target_ulong startWork(CPUArchState *env, target_ulong start, target_ulong end)
+static target_ulong startTrace(CPUArchState *env, target_ulong start, target_ulong end)
 {
     afl_start_code = start;
     afl_end_code   = end;
     aflGotLog = 0;
     aflStart = 1;
+    return 0;
+}
+
+static target_ulong stopTrace()
+{
+    afl_start_code = 0;
+    afl_end_code   = 0;
+    aflGotLog = 0;
+    aflStart = 0;
     return 0;
 }
 
@@ -472,6 +614,55 @@ static target_ulong doneWork(target_ulong val)
     exit(val); /* exit forkserver child */
 }
 
+static struct timeval snap_time;
+
+target_ulong afl_endWork(int saved_vm_running)
+{
+// need reload vmi, reset afl data.
+    int status = 0; //?WEXITSTATUS;
+    static unsigned char tmp[4];
+//exit
+/*
+    int pid = fork();
+    if(pid == 0) exit(0);
+    waitpid(pid, &status, 0);
+    printf("status is %x\n", status);
+*/
+    //DECAF_printf("write status\n");
+    if (write(FORKSRV_FD + 1, &status, 4) != 4) exit(7);
+//restart from parent
+    if (uninterrupted_read(FORKSRV_FD, tmp, 4) != 4) exit(2);
+    //DECAF_printf("startCreatesnapshot6 over\n");
+    
+    const char *name = "decaf_snap";
+    Error *err = NULL;
+    //DECAF_printf("startCreatesnapshot7 over\n");
+
+    //DECAF_printf("startCreatesnapshot8 over\n");
+//reset afl_area_ptr, afl_start
+    memset(afl_area_ptr, 0, sizeof(afl_area_ptr) -1 );
+//
+    print_start = 1;
+  
+// load_snapshot 
+    gettimeofday(&snap_time, NULL);
+    DECAF_printf("before load time:%d,%d\n", snap_time.tv_sec, snap_time.tv_usec);
+    stopTrace();
+    if (load_snapshot(name, &err) == 0 && saved_vm_running) {
+	gettimeofday(&snap_time, NULL);
+	DECAF_printf("after load time:%d,%d\n", snap_time.tv_sec, snap_time.tv_usec);
+	//DECAF_printf("startCreatesnapshot8.5 over\n");
+        vm_start();
+    }
+    //hmp_handle_error(cur_mon, &err);
+//
+
+    //DECAF_printf("startCreatesnapshot9 over\n");
+    afl_forksrv_pid = getpid() + 1;
+    if (write(FORKSRV_FD + 1, &afl_forksrv_pid, 4) != 4) exit(5);
+    DECAF_printf("\n\nafl reload snapshot\n");
+    return 0;
+}
 
 u_long aflInit(char *pt)
 {
