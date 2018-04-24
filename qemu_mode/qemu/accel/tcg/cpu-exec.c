@@ -198,7 +198,6 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
     }
 
     if(afl_wants_cpu_to_stop){
-	printf("cpu-exec:%d\n",afl_wants_cpu_to_stop);
 	cpu->exit_request = 1;
 	
     }

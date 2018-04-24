@@ -58,17 +58,29 @@ trap cleanup EXIT
 echo "Starting firmware emulation... use Ctrl-a + x to exit"
 sleep 1s
 
+#AFL="../afl-fuzz -t 800000+ -i ../inputs -o ../outputs -QQ --"
 AFL="../afl-fuzz -t 800000+ -i ../inputs -o ../outputs -QQ --"
 QEMU="../qemu_mode/qemu/mipsel-softmmu/qemu-system-mipsel"
+#QEMU=" ../../../tmp/DECAF/decaf/mipsel-softmmu/qemu-system-mipsel"
+#QEMU="../../../tmp/qemu/mipsel-softmmu/qemu-system-mipsel"
 KERNEL="./binaries/vmlinux.mipsel" #vmlinux_3.2.1_mipsel
 echo ${KERNEL}
+IMAGE="./scratch/2/image.qcow2"
+echo ${QEMU_ROOTFS}
+echo ${IMAGE}
+
+#remeber to change the format raw to qcow2
 
 #gdb -q --args \
 
+#./start \
+gdb -q --args \
 ${AFL} \
 ${QEMU} -monitor telnet:127.0.0.1:4444,server -m 256 -M ${QEMU_MACHINE} -kernel ${KERNEL} \
-    -drive if=ide,format=raw,file=${IMAGE} -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \
-    -nographic \
+    -drive if=ide,format=qcow2,file=${IMAGE} -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \
+    -nographic -smp 1,cores=1,threads=1 \
     -net nic,vlan=0 -net socket,vlan=0,listen=:2000 -net nic,vlan=1 -net socket,vlan=1,listen=:2001 -net nic,vlan=0 -net tap,vlan=0,id=net0,ifname=${TAPDEV_0},script=no -net nic,vlan=3 -net socket,vlan=3,listen=:2003 \
 -aflFile @@ | tee ${WORK_DIR}/qemu.final.serial.log
+#-aflFile /home/zyw/experiment/TriforceAFL_new/inputs/ex1 | tee ${WORK_DIR}/qemu.final.serial.log
+#../qemu_mode/qemu/qemu-img convert -f raw -O qcow2 ./scratch/2/image.raw ./scratch/2/image.qcow2
 

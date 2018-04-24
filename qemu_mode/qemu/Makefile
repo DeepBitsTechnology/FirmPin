@@ -11,7 +11,7 @@ UNCHECKED_GOALS := %clean TAGS cscope ctags docker docker-%
 # All following code might depend on configuration variables
 ifneq ($(wildcard config-host.mak),)
 # Put the all: rule here so that config-host.mak can contain dependencies.
-all:
+all:sleuthkit
 include config-host.mak
 
 # Check that we're not trying to do an out-of-tree build from
