@@ -135,54 +135,58 @@ FILE * keylogger_log=DECAF_NULL_HANDLE;
 #define MAX_STACK_SIZE 5000
 char modname_t[512];
 char func_name_t[512];
-uint32_t sys_call_ret_stack[MAX_STACK_SIZE];
-uint32_t sys_call_entry_stack[MAX_STACK_SIZE];
-uint32_t cr3_stack[MAX_STACK_SIZE];
-uint32_t stack_top = 0;
-void check_call(DECAF_Callback_Params *param)
+uint32_t sys_call_ret_stack[2][MAX_STACK_SIZE];
+uint32_t sys_call_entry_stack[2][MAX_STACK_SIZE];
+uint32_t cr3_stack[2][MAX_STACK_SIZE];
+uint32_t stack_top[2];
+
+
+void check_call(DECAF_Callback_Params *param, int index)
 {
+	//DECAF_printf("check_call:%d\n", index);
 	CPUState *env=param->be.env;
 	CPUArchState *mips_env = env->env_ptr;
 	if(env == NULL)
 	return;
 	target_ulong pc = param->be.next_pc;
 	target_ulong cr3 = DECAF_getPGD(env) ;
-	if(stack_top == MAX_STACK_SIZE)
+	if(stack_top[index] == MAX_STACK_SIZE)
 	{
      //if the stack reaches to the max size, we ignore the data from stack bottom to MAX_STACK_SIZE/10
-		memcpy(sys_call_ret_stack,&sys_call_ret_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
-		memcpy(sys_call_entry_stack,&sys_call_entry_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
-		memcpy(cr3_stack,&cr3_stack[MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
-		stack_top = MAX_STACK_SIZE-MAX_STACK_SIZE/10;
+		memcpy(sys_call_ret_stack[index],&sys_call_ret_stack[index][MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		memcpy(sys_call_entry_stack[index],&sys_call_entry_stack[index][MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		memcpy(cr3_stack,&cr3_stack[index][MAX_STACK_SIZE/10],MAX_STACK_SIZE-MAX_STACK_SIZE/10);
+		stack_top[index] = MAX_STACK_SIZE-MAX_STACK_SIZE/10;
 		return;
 	}
 
 	//DECAF_read_mem(env,mips_env->active_tc.gpr[28],4,&sys_call_ret_stack[stack_top]);
-	sys_call_entry_stack[stack_top] = pc;
-	cr3_stack[stack_top] = cr3;
-	stack_top++;
+	sys_call_entry_stack[index][stack_top[index]] = pc;
+	cr3_stack[index][stack_top[index]] = cr3;
+	stack_top[index]++;
 
 
 
 
 }
-void check_ret(DECAF_Callback_Params *param)
+void check_ret(DECAF_Callback_Params *param, int index)
 {
-	if(!stack_top)
+	//DECAF_printf("check_ret:%d\n", index);
+	if(!stack_top[index])
 		return;
-	if(stack_top > 0){
-		if(param->be.next_pc == sys_call_entry_stack[stack_top-1])
+	if(stack_top[index] > 0){
+		if(param->be.next_pc == sys_call_entry_stack[index][stack_top[index]-1])
 		{
-			stack_top--;
+			stack_top[index]--;
 		}
 		else if(param->be.next_pc > 0x80000000){
 			DECAF_printf("jump into kernel, maybe not overflow\n");
 		} 
 		else{
-			DECAF_printf("stack overflow:%x, %x, %d\n", param->be.next_pc, sys_call_entry_stack[stack_top-1], stack_top - 1);
+			DECAF_printf("stack overflow(%d):%x, %x, %d\n", index, param->be.next_pc, sys_call_entry_stack[stack_top[index]-1], stack_top[index] - 1);
 
-			for(int i=0;i< stack_top;i++){
-				DECAF_printf("%d:%x\n",i,sys_call_entry_stack[i]);
+			for(int i=0;i< stack_top[index];i++){
+				DECAF_printf("%d:%x\n",i,sys_call_entry_stack[index][i]);
 			}
 			//DECAF_printf("checke ret done work\n");
 			endWork(32);
@@ -255,7 +259,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 			time.tv_sec = 0;
 			time.tv_usec = 0;
 			DECAF_write_mem(param->bb.env, time_addr, sizeof(struct timeval), &time);
-			DECAF_printf("cur_pro:%s, function:%s, pc:%x, time:%d,%d\n", cur_process, functionname, pc, time.tv_sec, time.tv_usec);
+			//DECAF_printf("cur_pro:%s, function:%s, pc:%x, time:%d,%d\n", cur_process, functionname, pc, time.tv_sec, time.tv_usec);
 		}
 		return;
 
@@ -282,7 +286,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 			target_ulong i = a2;
 			DECAF_read_mem(param->bb.env, i, 4, &addr);
 			while(addr!=0){				
-				memset(tmpBuf, 0, 500);
+				memset(tmpBuf, 0, 8600);
 				DECAF_read_mem(param->bb.env, addr, 500, tmpBuf);
 				//DECAF_printf("cur_pro:%s, %x,function:%s,%x,%s\n", cur_process, pc, functionname, addr, tmpBuf);
 	
@@ -303,7 +307,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 						gettimeofday(&tv_api, NULL);
 						//if(rest_len > 8600) rest_len = 8600 - strlen("HTTP_COOKIE=") -1;
 						//DECAF_printf("pc:%x,time:%d,%d,len %d, current data is %s\n", pc, tv_api.tv_sec, tv_api.tv_usec, rest_len, current_data);// current_data
-						DECAF_write_mem(param->bb.env, addr + strlen("HTTP_COOKIE="), rest_len, current_data);
+						DECAF_write_mem(param->bb.env, addr + strlen("HTTP_COOKIE=uid="), rest_len, current_data);
 						//cpu->active_tc.gpr[2] = rest_len + strlen("SERVER_SOFTWARE="); // not the same as read
 						rest_len = 0;
 					}
@@ -418,26 +422,45 @@ static void do_block_end(DECAF_Callback_Params* param){
 	target_ulong bk_pc = param->be.tb->pc;
 	target_ulong pgd = DECAF_getPGD(param->be.env);
 	int index = targetcr3_exist(pgd);
-	if(index == -1)
-		return;
-
 	char cur_process[512];
 	int pid;
 	VMI_find_process_by_cr3_c(pgd, cur_process, 512, &pid);
-	//DECAF_printf("%s:%d:block end:%x\n", cur_process, pid, bk_pc);
+	if(index == -1)
+	{
+		index = target_exist(cur_process);
+		if(index != -1)
+		{
+			targetcr3[index] = pgd;
+			targetpid[index] = pid;
+		}
+		else{
+			return;
+		}
+	}
+	else{
+		index = target_exist(cur_process); //sometimes the pgd of child program is the same as parent program. need to recalculate the index
+		if(index == -1) return; // cur_process is null, pid is 0
+	}
 	
+
 	if(strcmp(cur_process, "hedwig.cgi") != 0) // NEED CHANGE
 		return;
+
 	if(pc > 0x80000000)
 		return;
 
 //NEED CHANGE
-	if(pc >= 0x419470 && pc <= 0x41991c) //.MIPS.stubs for hedwig.cgi(cgibin)
-		return;
-/*
-	if(pc >= 0x411910 && pc <= 0x411f7c)//.MIPS.stubs for httpd
-		return;
-*/
+	if(index == 1){
+
+		if(pc >= 0x419470 && pc <= 0x41991c) //.MIPS.stubs for hedwig.cgi(cgibin)
+			return;
+	}
+	if(index == 0){
+		if(pc >= 0x411910 && pc <= 0x411f7c)//.MIPS.stubs for httpd
+			return;
+	}
+
+//
 	unsigned char insn_buf[4];
 	int is_call = 0, is_ret = 0;
 
@@ -491,9 +514,9 @@ static void do_block_end(DECAF_Callback_Params* param){
 	}
 
 	if (is_call)
-	check_call(param);
+	check_call(param, index);
 	else if (is_ret)
-	check_ret(param);
+	check_ret(param, index);
 
 
 }
@@ -555,7 +578,7 @@ static void callbacktests_removeproc_callback(VMI_Callback_Params* params)
 	int index = target_exist(procname);
 	if (index != -1)
 	{
-		stack_top = 0; //??????????????????????????? http end
+		stack_top[index] = 0; //??????????????????????????? http end
 		gettimeofday(&tv_api, NULL);
 		DECAF_printf("\nProcname:%s/%d,pid:%d, cr3:%x end, time:%d,%d\n",procname, index, pid, params->rp.cr3,  tv_api.tv_sec, tv_api.tv_usec);
 		//targetpid[index] = 0;
@@ -610,7 +633,8 @@ static int callbacktests_init(void)
 
 	target_main_address[0] = 0x40a218; //httpd
 	target_main_address[1] = 0x4023e0; //hedwig.cgi
-
+	stack_top[0] = 0;
+	stack_top[1] = 0;
 	processbegin_handle = VMI_register_callback(VMI_CREATEPROC_CB, &callbacktests_loadmainmodule_callback, NULL);
 	removeproc_handle = VMI_register_callback(VMI_REMOVEPROC_CB, &callbacktests_removeproc_callback, NULL);
 	block_begin_handle = DECAF_registerOptimizedBlockBeginCallback(&do_block_begin, NULL, INV_ADDR, OCB_ALL);
