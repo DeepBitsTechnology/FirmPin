@@ -68,6 +68,14 @@
 
 /* run_on_cpu_data.target_ptr should always be big enough for a
  * target_ulong even on 32 bit builds */
+
+//zyw
+int helper_flag = 0;
+int xxx = 0;
+int helper_ASID[2];
+
+
+
 QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
 
 /* We currently can't handle more than 16 bits in the MMUIDX bitmask.
@@ -288,6 +296,7 @@ static void tlb_flush_page_async_work(CPUState *cpu, run_on_cpu_data data)
 
 void tlb_flush_page(CPUState *cpu, target_ulong addr)
 {
+    //if(helper_flag == 1) printf("tlb flush page:%x\n", addr);
     tlb_debug("page :" TARGET_FMT_lx "\n", addr);
 
     if (!qemu_cpu_is_self(cpu)) {
@@ -846,8 +855,126 @@ static bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
  * is actually a ram_addr_t (in system mode; the user mode emulation
  * version of this function returns a guest virtual address).
  */
+
+
+//zyw
+int write_mapping()  
+{  
+    const char *fifo_name = "/tmp/mapping";  
+    int pipe_fd = -1;  
+    int data_fd = -1;  
+    int res = 0;  
+    const int open_mode = O_WRONLY;  
+    int bytes_sent = 0;  
+    char buffer[PIPE_BUF + 1];  
+  
+    if(access(fifo_name, F_OK) == -1)  
+    {  
+        //管道文件不存在  
+        //创建命名管道  
+        res = mkfifo(fifo_name, 0777);  
+        if(res != 0)  
+        {  
+            fprintf(stderr, "Could not create fifo %s\n", fifo_name);  
+            exit(EXIT_FAILURE);  
+        }  
+    }  
+  
+    printf("Process %d opening FIFO O_WRONLY\n", getpid());  
+    //以只写阻塞方式打开FIFO文件，以只读方式打开数据文件  
+    pipe_fd = open(fifo_name, open_mode);  
+    printf("Process %d result %d\n", getpid(), pipe_fd);  
+  
+    if(pipe_fd != -1)  
+    {  
+        int bytes_read = 0;  
+        //向数据文件读取数据  
+        bytes_read = read(data_fd, buffer, PIPE_BUF);  
+        buffer[bytes_read] = '\0';  
+        while(bytes_read > 0)  
+        {  
+            //向FIFO文件写数据  
+            res = write(pipe_fd, buffer, bytes_read);  
+            if(res == -1)  
+            {  
+                fprintf(stderr, "Write error on pipe\n");  
+                exit(EXIT_FAILURE);  
+            }  
+            //累加写的字节数，并继续读取数据  
+            bytes_sent += res;  
+            bytes_read = read(data_fd, buffer, PIPE_BUF);  
+            buffer[bytes_read] = '\0';  
+        }  
+        close(pipe_fd);  
+        close(data_fd);  
+    }  
+    else  
+        exit(EXIT_FAILURE);  
+  
+    printf("Process %d finished\n", getpid());  
+    exit(EXIT_SUCCESS);  
+}  
+
+
+
+//zyw
+#define FORKSRV_FD 198
+#define TSL_FD (FORKSRV_FD - 1)
+
+intptr_t addr_trans_table[CPU_TLB_SIZE];
+uint32_t httpd_pgd = 0;
+int pgd_changed = 0;
+
+
+struct tlb_item{
+  int index;
+  intptr_t addend;
+};
+
+void afl_wait_tlb(int fd) {
+
+  struct tlb_item t;
+  while (1) {
+
+    /* Broken pipe means it's time to return to the fork server routine. */
+
+    if (read(fd, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
+      break;
+    int index = t.index;
+    intptr_t addend = t.addend;
+    addr_trans_table[index] = addend;
+
+  }
+
+  close(fd);
+
+}
+
+static void afl_request_tlb(int index, intptr_t addend)
+{
+  struct tlb_item t;
+
+  t.index = index;
+  t.addend = addend;
+  if (write(TSL_FD, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
+    return;
+
+}
+
+//
+
+
+
 tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
 {
+
+//zyw
+
+    MIPSCPU *mips_cpu = mips_env_get_cpu(env);
+    CPUState *cs = CPU(mips_cpu);
+    target_ulong pgd = DECAF_getPGD(cs);
+
+//
     int mmu_idx, index, pd;
     void *p;
     MemoryRegion *mr;
@@ -855,10 +982,33 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
     CPUIOTLBEntry *iotlbentry;
 
     index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+//zyw
+
+    if(pgd_changed == 1){
+	DECAF_printf("pgd changed\n");
+	for(int i =0;i < CPU_TLB_SIZE; i++)
+	{
+		addr_trans_table[i] = 0;
+	}
+	pgd_changed = 0;
+    }
+
+    if(pgd == httpd_pgd && addr_trans_table[index] !=  0 && addr < 0x80000000) { 
+	p = (void *)((uintptr_t)addr +  addr_trans_table[index]); 
+	//DECAF_printf("addr is %d, %x,%x\n",index, addr, addr_trans_table[index]); 
+	return qemu_ram_addr_from_host_nofail(p);
+    }
+
+//
+
+    //if(helper_flag == 1 && addr < 0x70000000) printf("page_bit:%d,CPU_TLB_SIZE:%d\n", TARGET_PAGE_BITS, CPU_TLB_SIZE);
+    //if(helper_flag == 1 && addr < 0x70000000) printf("index:%x\n", index);
     mmu_idx = cpu_mmu_index(env, true);
     if (unlikely(env->tlb_table[mmu_idx][index].addr_code !=
                  (addr & (TARGET_PAGE_MASK | TLB_INVALID_MASK)))) {
         if (!VICTIM_TLB_HIT(addr_read, addr)) {
+	    //if(helper_flag == 1 && addr < 0x70000000) printf("tlb fill:%x\n", addr);
+	    xxx = 1;
             tlb_fill(ENV_GET_CPU(env), addr, MMU_INST_FETCH, mmu_idx, 0);
         }
     }
@@ -885,6 +1035,30 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
         exit(1);
     }
     p = (void *)((uintptr_t)addr + env->tlb_table[mmu_idx][index].addend);
+//zyw
+/*
+    uint16_t ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask; //zyw
+    int ind = 0;
+    if(helper_ASID[0] == ASID) ind = 0;
+    else if(helper_ASID[1] == ASID) ind = 1;
+    else return qemu_ram_addr_from_host_nofail(p);
+    //if(helper_flag == 1 && addr < 0x70000000 && xxx ==1){ DECAF_printf("index:%d, ASID:%d,addr:%x,mmu_idx:%d,index:%d,addend:%x,p:%x\n",ind,ASID, addr, mmu_idx, index, env->tlb_table[mmu_idx][index].addend, p); xxx = 0;}
+*/
+//zyw
+
+    if(pgd == httpd_pgd && addr_trans_table[index] == 0 && addr < 0x80000000) {
+	//DECAF_printf("http_pgd:%x, tlb add %x, %x,%x,%x,%x\n", pgd, index, addr & 0xfffff000, addr, env->tlb_table[mmu_idx][index].addend, p); 
+	DECAF_printf("%x:%x\n",addr & 0xfffff000, (uintptr_t)(addr & 0xfffff000) + env->tlb_table[mmu_idx][index].addend); 
+	addr_trans_table[index] = env->tlb_table[mmu_idx][index].addend;// current tlb_table in child process need to be updated. 
+	afl_request_tlb(index, env->tlb_table[mmu_idx][index].addend);// tlb_table in parent process need to be updated.
+    }
+    if(pgd == httpd_pgd && addr_trans_table[index] != 0 && addr < 0x80000000) {
+	if(addr_trans_table[index] != env->tlb_table[mmu_idx][index].addend){
+		DECAF_printf("not the same %d, %x, %x,%x\n", index, addr, addr_trans_table[index], env->tlb_table[mmu_idx][index].addend);	
+	}	
+    }
+
+//
     return qemu_ram_addr_from_host_nofail(p);
 }
 

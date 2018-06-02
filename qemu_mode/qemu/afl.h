@@ -14,3 +14,7 @@ void set_afl_wants_cpu_to_stop();
 
 void afl_setup(void);
 void afl_forkserver(CPUArchState*);
+
+//zyw
+
+

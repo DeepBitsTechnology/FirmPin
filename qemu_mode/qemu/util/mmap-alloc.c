@@ -104,6 +104,13 @@ void *qemu_ram_mmap(int fd, size_t size, size_t align, bool shared)
                 (fd == -1 ? MAP_ANONYMOUS : 0) |
                 (shared ? MAP_SHARED : MAP_PRIVATE),
                 fd, 0);
+	//zyw
+    printf("mmap:%x,%x %d,%d,%x\n", ptr + offset, ptr1, (size/1024)/1024, shared, fd);
+    if(shared) {
+    	FILE *fp = fopen("/home/zyw/tmp/afl_user_mode/image/mapping_table","w");
+    	fprintf(fp, "%x\n", ptr1);
+    	fclose(fp);
+    }
     if (ptr1 == MAP_FAILED) {
         munmap(ptr, total);
         return MAP_FAILED;

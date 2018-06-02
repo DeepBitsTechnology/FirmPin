@@ -167,12 +167,31 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 
     cpu->can_do_io = !use_icount;
     target_ulong pc = env->active_tc.PC; //zyw mips
-    if(aflStart == 2){
-	DECAF_printf("zyw tcg_qemu_tb_exec\n");
-    }
+    if(aflStart == 2) 	DECAF_printf("before tcg_qemu_tb_exec pc:%x\n", itb->pc);
+    
+if(next_output)
+{	
+	if(aflStart){
+		target_ulong pgd = DECAF_getPGD(cpu);
+		char cur_process[512];
+		  int pid;
+		VMI_find_process_by_cr3_c(pgd, cur_process, 512, &pid);
+		//if(strcmp(cur_process, "hedwig.cgi") == 0){// NEED CHANGE
+			//DECAF_printf("print_pc is %x\n", pc);
+			AFL_QEMU_CPU_SNIPPET2(env, pc);
+		//}
+	}
+}
+else
+{
+	next_output = 1;
+}
+
+
     ret = tcg_qemu_tb_exec(env, tb_ptr);
-    if(aflStart == 2) DECAF_printf("after tcg_qemu_tb_exec:%x,ret: %x\n", tb_ptr, ret);
+    if(aflStart == 2) DECAF_printf("after tcg_qemu_tb_exec:%x,ret: %x\n", itb->pc, ret);
     cpu->can_do_io = 1;
+    
     last_tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     tb_exit = ret & TB_EXIT_MASK;
     trace_exec_tb_exit(last_tb, tb_exit);
@@ -199,6 +218,11 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 
     else
     {	
+	if(ret == 0) //zyw solve multiple path problem
+	{
+		next_output = 0;
+	}
+/*
 	if(next_output)
 	{	
 		if(aflStart){
@@ -206,9 +230,10 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 			char cur_process[512];
 			int pid;
 			VMI_find_process_by_cr3_c(pgd, cur_process, 512, &pid);
-			if(strcmp(cur_process, "hedwig.cgi") == 0){
+			//if(strcmp(cur_process, "hedwig.cgi") == 0){// NEED CHANGE
+			DECAF_printf("print_pc is %x\n", pc);
 				AFL_QEMU_CPU_SNIPPET2(env, pc);
-			}
+			//}
 		}
 	}
 	else
@@ -219,7 +244,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 	{
 		next_output = 0;
 	}
-
+*/
     }
 /*
     if(afl_wants_cpu_to_stop){
@@ -366,6 +391,8 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
     desc.trace_vcpu_dstate = *cpu->trace_dstate;
     desc.pc = pc;
     phys_pc = get_page_addr_code(desc.env, pc);
+//zyw    
+    //printf("phys_pc is:%x,%x\n", pc, phys_pc);
     desc.phys_page1 = phys_pc & TARGET_PAGE_MASK;
     h = tb_hash_func(phys_pc, pc, flags, *cpu->trace_dstate);
     return qht_lookup(&tcg_ctx.tb_ctx.htable, tb_cmp, &desc, h);
@@ -682,6 +709,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 }
 
 extern int flagg;
+extern int helper_flag;
 /* main execution loop */
 
 int cpu_exec(CPUState *cpu)

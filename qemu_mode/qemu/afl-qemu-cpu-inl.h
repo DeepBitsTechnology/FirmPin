@@ -156,9 +156,56 @@ struct afl_tsl {
 };
 
 
+	
+//zyw
+extern int kernel_stack_count;
+extern int user_stack_count;
+extern int kernel_origpt;
+extern int user_origpt;
+extern int user_forkpt;
+extern int user_stack[1000];
+//extern int kenerl[0x10000000];
+
 extern target_ulong startCreatesnapshot(CPUArchState *env, target_ulong enableTicks);
-extern target_ulong endWork();
+extern target_ulong endWork(target_ulong status);
 extern target_ulong startFork(CPUArchState *env, target_ulong enableTicks);
+extern void loadCPUState(CPUArchState *env);
+extern void storeCPUState(CPUArchState *env);
+
+#define MAX_STACK_SIZE 5000
+uint32_t sys_call_ret_stack[2][MAX_STACK_SIZE];
+uint32_t sys_call_entry_stack[2][MAX_STACK_SIZE];
+uint32_t cr3_stack[2][MAX_STACK_SIZE];
+uint32_t stack_top[2];
+
+uint32_t saved_stack[2][MAX_STACK_SIZE];
+uint32_t saved_stack_top[2];
+
+void backup_stack()
+{
+	for(int index=0; index<2; index++)
+	{
+		for(int i=0; i<stack_top[index]; i++)
+		{	
+			saved_stack[index][i] = sys_call_entry_stack[index][i];
+		}
+		saved_stack_top[index] = stack_top[index];
+	}
+}
+
+void restore_stack()
+{
+	for(int index=0; index<2; index++)
+	{
+		for(int i=0; i<saved_stack_top[index]; i++)
+		{	
+			sys_call_entry_stack[index][i] = saved_stack[index][i] ;
+		}
+		stack_top[index] = saved_stack_top[index];
+	}
+}
+
+
 
 /*************************
  * ACTUAL IMPLEMENTATION *
@@ -220,7 +267,16 @@ static ssize_t uninterrupted_read(int fd, void *buf, size_t cnt)
 /* Fork server logic, invoked once we hit _start. */
 static struct timeval tv_time;
 
+extern void afl_wait_tlb(int fd);
+
+int forkserver_looptimes = 0;
+
 void afl_forkserver(CPUArchState *env) {
+//zyw
+  MIPSCPU *mips_cpu = mips_env_get_cpu(env);
+  CPUState *cpu = CPU(mips_cpu);
+
+//zyw
 
   static unsigned char tmp[4];
   if (!afl_area_ptr) return;
@@ -234,7 +290,9 @@ void afl_forkserver(CPUArchState *env) {
   /* All right, let's await orders... */
 
   while (1) {
-
+    
+    forkserver_looptimes ++;
+    if(forkserver_looptimes == 2) sleep(10000);
     pid_t child_pid;
     int status, t_fd[2];
 
@@ -250,11 +308,32 @@ void afl_forkserver(CPUArchState *env) {
     struct timeval tv_start;
     gettimeofday(&tv_start,NULL);
     DECAF_printf("before fork process\n");
+
+
+    user_forkpt = env->active_tc.gpr[29];//sp
+    //DECAF_printf("save state restart_cpu:%x,pc:%x, user_forkpt:%x, user_stack:%x, len:%d\n",cpu,env->active_tc.PC, user_forkpt, user_stack, user_origpt-user_forkpt);
+    if(user_origpt-user_forkpt > 0){
+	    cpu_memory_rw_debug(cpu, user_forkpt, user_stack, user_origpt-user_forkpt, 0);
+/*
+	    DECAF_printf("save state");
+	    for(int i=0;i<1000;i++)
+	      {  
+		if(user_stack[i]!=0){
+			DECAF_printf("%x ",user_stack[i]);
+		}
+	     }DECAF_printf("\n");
+*/
+    }
+
+
     child_pid = fork();
     
     if (child_pid < 0) exit(4);
 
     if (!child_pid) {
+      //DECAF_printf("restart_cpu:%x, pc:%x, sp:%x, user_forkpt:%x, user_stack:%x, len:%d\n",cpu, env->active_tc.PC, env->active_tc.gpr[29], user_forkpt, user_stack, user_origpt-user_forkpt);
+      
+      //if(cpu_memory_rw_debug(cpu, user_forkpt, user_stack, user_origpt-user_forkpt, 1)!=0) DECAF_printf("memory write error\n");
       DECAF_printf("in child process\n");
       struct timeval tv_end;
       gettimeofday(&tv_end,NULL);
@@ -278,7 +357,8 @@ void afl_forkserver(CPUArchState *env) {
 
     /* Collect translation requests until child dies and closes the pipe. */
 
-    afl_wait_tsl(env, t_fd[0]);
+    //afl_wait_tsl(env, t_fd[0]);
+    afl_wait_tlb(t_fd[0]);
 
     /* Get and relay exit status to parent. */
 
@@ -294,6 +374,8 @@ static inline target_ulong aflHash(target_ulong cur_loc)
   if(!aflStart)
     return 0;
 
+  if(!print_start)
+    return 0;
   /* Optimize for cur_loc > afl_end_code, which is the most likely case on
      Linux systems. */
 
@@ -301,11 +383,11 @@ static inline target_ulong aflHash(target_ulong cur_loc)
     return 0;
 
   //DECAF_printf("exec %lx\n", cur_loc); //zyw
-  if(print_start == 1){
+  //if(print_start ==1){
   	//DECAF_printf("exec %lx\n", cur_loc); //zyw path information
-	print_pc[print_index] = cur_loc;
-	print_index++;
-  }
+	//print_pc[print_index] = cur_loc;
+	//print_index++;
+  //}
 #ifdef DEBUG_EDGES
   if(1) {
     printf("exec %lx\n", cur_loc);
@@ -344,7 +426,13 @@ static inline target_ulong aflHash(target_ulong cur_loc)
 /* todo: generate calls to helper_aflMaybeLog during translation */
 static inline void helper_aflMaybeLog(target_ulong cur_loc) {
   static __thread target_ulong prev_loc;
+  //if(print_start ==1){
+  	//DECAF_printf("exec %lx\n", cur_loc); //zyw path information
+	//print_pc[print_index] = cur_loc ^ prev_loc;
+	//print_index++;
+  //}
   afl_area_ptr[cur_loc ^ prev_loc]++;
+  //DECAF_printf("loc:%x\n", cur_loc ^ prev_loc);
   prev_loc = cur_loc >> 1;
 }
 
@@ -444,6 +532,7 @@ static void afl_wait_tsl(CPUArchState *env, int fd) {
 
 }
 
+
 void afl_createsnapshot(CPUArchState *env, target_ulong enableTicks)
 {
 
@@ -456,17 +545,14 @@ void afl_createsnapshot(CPUArchState *env, target_ulong enableTicks)
 	if (write(FORKSRV_FD + 1, tmp, 4) != 4) return;
 
 	/* All right, let's await orders... */
-	//DECAF_printf("startCreatesnapshot1 over\n");
 	if (uninterrupted_read(FORKSRV_FD, tmp, 4) != 4) exit(2);
-	//DECAF_printf("startCreatesnapshot2 over\n");
 
 // save snapshot
 	Error *err = NULL;
 	const char *snapshot_name = "decaf_snap";
 	save_snapshot(snapshot_name, &err);
-
+	backup_stack();
 //
-	//DECAF_printf("startCreatesnapshot3 over\n");
 	//hmp_handle_error(cur_mon, &err);
 	
 	print_start = 1;
@@ -504,6 +590,7 @@ static target_ulong startForkserver(CPUArchState *env, target_ulong enableTicks)
     //DECAF_printf("config_system\n");
     aflEnableTicks = enableTicks; //zyw
     afl_wants_cpu_to_stop = 1;
+    print_start = 1;
     //set_afl_wants_cpu_to_stop();
    
 #endif
@@ -518,7 +605,7 @@ static target_ulong getWork(CPUArchState *env, char * ptr, target_ulong sz)
     unsigned char ch;
     //printf("pid %d: getWork %lx %lx\n", getpid(), ptr, sz);fflush(stdout);
     //assert(aflStart == 0);
-    //DECAF_printf("filename:%s\n",aflFile);
+    DECAF_printf("filename:%s\n",aflFile);
     fp = fopen(aflFile, "rb");
     if(!fp) {
          perror(aflFile);
@@ -619,6 +706,7 @@ static struct timeval snap_time;
 target_ulong afl_endWork(int saved_vm_running, int stat)
 {
 // need reload vmi, reset afl data.
+    DECAF_printf("afl_endWork\n");
     int status = 0; //?WEXITSTATUS;
     static unsigned char tmp[4];
     status = stat;
@@ -635,15 +723,14 @@ target_ulong afl_endWork(int saved_vm_running, int stat)
     if (write(FORKSRV_FD + 1, &status, 4) != 4) exit(7);
 //restart from parent
     if (uninterrupted_read(FORKSRV_FD, tmp, 4) != 4) exit(2);
-    //DECAF_printf("startCreatesnapshot6 over\n");
     
     const char *name = "decaf_snap";
     Error *err = NULL;
-    //DECAF_printf("startCreatesnapshot7 over\n");
 
-    //DECAF_printf("startCreatesnapshot8 over\n");
 //reset afl_area_ptr, afl_start
-    memset(afl_area_ptr, 0, sizeof(afl_area_ptr) -1 );
+    //memset(afl_area_ptr, 0, sizeof(afl_area_ptr) -1 );
+    //DECAF_printf("size of unsigned char:%d\n", sizeof(unsigned char));
+    memset(afl_area_ptr, 0, 0xfffff*sizeof(unsigned char));
 //
     print_start = 1;
   
@@ -651,12 +738,13 @@ target_ulong afl_endWork(int saved_vm_running, int stat)
     gettimeofday(&snap_time, NULL);
     DECAF_printf("before load time:%d,%d\n", snap_time.tv_sec, snap_time.tv_usec);
     stopTrace();
+    restore_stack();
     if (load_snapshot(name, &err) == 0 && saved_vm_running) {
 	gettimeofday(&snap_time, NULL);
 	DECAF_printf("after load time:%d,%d\n", snap_time.tv_sec, snap_time.tv_usec);
-	//DECAF_printf("startCreatesnapshot8.5 over\n");
         vm_start();
     }
+ 
     //hmp_handle_error(cur_mon, &err);
 //
 

@@ -99,12 +99,6 @@ int flagg = 0;
 #define CPU_THROTTLE_TIMESLICE_NS 10000000
 
 
-void set_afl_wants_cpu_to_stop()
-{
-    afl_wants_cpu_to_stop = 1;
-    printf("afl_wants:%d\n",afl_wants_cpu_to_stop);
-}
-
 bool cpu_is_stopped(CPUState *cpu)
 {
     return cpu->stopped || !runstate_is_running();
@@ -1533,8 +1527,8 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     /* process any pending work */
     cpu->exit_request = 1;
 //zywz
-    while (1) { //zyw
-    //while (!afl_wants_cpu_to_stop) {
+   // while (1) { //zyw
+    while (!afl_wants_cpu_to_stop) {
 	CPUArchState * env = (CPUArchState *)cpu->env_ptr;
 	if(flagg ==2) DECAF_printf("loop2.5, pc:%x\n", env->active_tc.PC);
         if (cpu_can_run(cpu)) {
@@ -1580,34 +1574,28 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     }
 //zyw
 
-/*
+
     if(afl_wants_cpu_to_stop) {
 	flagg = 1;
-//zyw
-	if(afl_wants_cpu_to_stop == 1){
-		if(write(afl_qemuloop_pipe[1], "FOR", 4) != 4)
-		    perror("write afl_qemuloop_pip");
-	}
-	else if(afl_wants_cpu_to_stop == 2){
-		if(write(afl_qemuloop_pipe[1], "END", 4) != 4)
-		    perror("write afl_qemuloop_pip");
-	}
 	afl_wants_cpu_to_stop = 0;
-        //afl_qemuloop_pipe[1] = -1; //zyw
-	
+	//sleep(1);
+	//goto label;	
+	//qemu_cond_signal(&qemu_cpu_cond);
+	//qemu_mutex_unlock_iothread();
+	if(write(afl_qemuloop_pipe[1], "FORK", 4) != 4)
+	    DECAF_printf("write afl_qemuloop_pip");	
+	afl_qemuloop_pipe[1] = -1;
+	printf("afl_wants_cpu_to_stop,first cpu:%x\n",first_cpu);
 	restart_cpu = first_cpu;
-        first_cpu = NULL;
-
-        //cpu_disable_ticks();
-
-	//atomic_mb_set(&cpu->exit_request, 0);
-        qemu_tcg_wait_io_event(cpu ? cpu : QTAILQ_FIRST(&cpus)); //zyw
-	//qemu_mutex_lock_iothread();        
-	sleep(1);
+	first_cpu = NULL;
+	cpu_disable_ticks();
+        qemu_tcg_wait_io_event(cpu ? cpu : QTAILQ_FIRST(&cpus));
+	//qemu_mutex_unlock_iothread();
+	//sleep(1);
     }
 //zyw
     return NULL;
-*/
+
 }
 
 static void qemu_cpu_kick_thread(CPUState *cpu)
@@ -1860,17 +1848,18 @@ static void qemu_dummy_start_vcpu(CPUState *cpu)
 
 target_ulong startFork(CPUArchState *env, target_ulong enableTicks)
 {
+	print_start = 1;
 	if(write(afl_qemuloop_pipe[1], "FOR", 4) != 4)
 	{
 	    perror("write afl_qemuloop_pip");
 	}
-	//sleep(1);
 	return 0; 
 }
 
 
 target_ulong startCreatesnapshot(CPUArchState *env, target_ulong enableTicks)
 {
+	DECAF_printf("startCreatesnapshot\n");
 	aflEnableTicks = enableTicks; //zyw
 	if(write(afl_qemuloop_pipe[1], "FOR", 4) != 4)
 	{
@@ -1883,6 +1872,7 @@ target_ulong startCreatesnapshot(CPUArchState *env, target_ulong enableTicks)
 
 target_ulong endWork(target_ulong status)
 {
+	DECAF_printf("endWork\n");
 	if(status == 0){
 		if(write(afl_qemuloop_pipe[1], "END", 4) != 4)
 		{
@@ -1900,6 +1890,28 @@ target_ulong endWork(target_ulong status)
 	return 0;
 
 }
+
+CPUArchState backup_cpu;
+
+void storeCPUState(CPUArchState *env)
+{
+	for(int i=0; i<32; i++)
+	{
+		backup_cpu.active_tc.gpr[i] = 	env->active_tc.gpr[i];
+	}
+	backup_cpu.active_tc.PC = env->active_tc.PC;
+}
+
+void loadCPUState(CPUArchState *env)
+{
+	for(int i=0; i<32; i++)
+	{
+		env->active_tc.gpr[i] = backup_cpu.active_tc.gpr[i];
+	}
+	env->active_tc.PC = backup_cpu.active_tc.PC;
+	printf("pc is %x\n",env->active_tc.PC);
+}
+
 
 char * trim(char *str)
 {
@@ -1926,16 +1938,17 @@ char * trim(char *str)
 }
 
 
+
 //zyw
+/*
 static void
 gotPipeNotification(void *ctx)
 {//first stopvm
     int saved_vm_running  = runstate_is_running();
     vm_stop(RUN_STATE_RESTORE_VM);
-    DECAF_printf("vm already stop\n");
     CPUArchState *env;
     char buf[4]; //
-    /* cpu thread asked us to run AFL forkserver */
+
     if(read(afl_qemuloop_pipe[0], buf, 4) != 4) {
 	DECAF_printf("read error\n");
         printf("error reading afl/qemu pipe!\n");
@@ -1947,8 +1960,6 @@ gotPipeNotification(void *ctx)
     //env = restart_cpu->env_ptr;
 
     if(strcmp(buf, "FOR") == 0){
-	//DECAF_printf("afl_createsnapshot\n");
-	
 	afl_setup();
     	afl_createsnapshot(env, 0);
 	if (saved_vm_running) {
@@ -1992,6 +2003,11 @@ gotPipeNotification(void *ctx)
 	DECAF_printf("afl what:%s\n");
     }
 
+
+
+}
+*/
+
 /*
     // we're now in the child!
     single_tcg_cpu_thread = NULL; //zyw 
@@ -2007,7 +2023,42 @@ gotPipeNotification(void *ctx)
     //qemu_clock_warp(QEMU_CLOCK_VIRTUAL); //zyw no definition
 */
 
+int kernel_stack_count = 0;
+int user_stack_count = 0;
+int kernel_origpt = 0;
+int user_origpt = 0;
+int user_forkpt;
+int user_stack[1000];
+//int kenerl[0x10000000];
+
+static void
+gotPipeNotification(void *ctx)
+{
+    CPUArchState *env;
+    char buf[4];
+
+    if(read(afl_qemuloop_pipe[0], buf, 4) != 4) {
+        printf("error reading afl/qemu pipe!\n");
+        exit(1);
+    }
+    printf("first cpu:%x\n",restart_cpu);
+
+
+    afl_setup();
+    //env = NULL; //XXX for now.. if we want to share JIT to the parent we will need to pass in a real env here
+    env = restart_cpu->env_ptr;
+    afl_forkserver(env);
+
+    single_tcg_cpu_thread = NULL;
+    first_cpu = restart_cpu;
+    if(aflEnableTicks) // re-enable ticks only if asked to
+        cpu_enable_ticks();
+   
+    qemu_tcg_init_vcpu(restart_cpu); //zyw
+    qemu_account_warp_timer();
+    //qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
 }
+
 
 //zyw
 

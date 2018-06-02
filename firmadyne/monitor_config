@@ -2,8 +2,17 @@ load_plugin ../qemu_mode/qemu/plugins/callbacktests/callbacktests.so
 do_callbacktests httpd
 do_callbacktests hedwig.cgi
 
+do_callbacktests single_httpd_sa
+
+
+
+
+
 do_callbacktests httpd_sample
 do_callbacktests execv_sample
+
+
+
 Alphanetworks
 wrgnd08_dlob_dir815
 
@@ -24,6 +33,35 @@ Connection: keep-alive
 Upgrade-Insecure-Requests: 1
 
 updatewifistats
+
+tlb_fill
+
+object_add memory-backend-file,id=mem1,size=64M,mem-path=/dev/hugepages
+device_add pc-dimm,id=dimm1,memdev=mem1
+
+memory_region_init_ram_from_file
+qemu_ram_alloc_from_file
+qemu_ram_mmap
+
+mips_cpu_exec_interrupt
+
+CPUState cpu;
+MIPSCPU *mips_cpu = MIPS_CPU(cpu);
+CPUMIPSState *env = &mips_cpu->env;
+
+CPUArchState env;
+MIPSCPU *mips_cpu = mips_env_get_cpu(env);
+CPUState *cs = CPU(mips_cpu);
+
+sysctl -w vm.nr_hugepages = 1496 
+sysctl -p
+
+tlb_set_page_with_attrs
+
+start pc is:7752aa00
+ctx.pc:7752aa00
+addr 7752aa00,d4554a00
+
 
 
 

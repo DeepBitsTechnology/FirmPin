@@ -49,7 +49,8 @@
 #include <glib.h>
 #include <mcheck.h>
 
-
+#include "shared/hookapi.h"
+#include "shared/utils/Output.h"
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -62,7 +63,6 @@ extern "C" {
 #ifdef __cplusplus
 };
 #endif /* __cplusplus */
-
 
 
 
@@ -97,18 +97,23 @@ using namespace ELFIO;
 
 /* Call back action for file_walk
  */
+int fla = 0;
+
+
 static TSK_WALK_RET_ENUM
 write_action(TSK_FS_FILE * fs_file, TSK_OFF_T a_off, TSK_DADDR_T addr,
     char *buf, size_t size, TSK_FS_BLOCK_FLAG_ENUM flags, void *ptr)
 {
+    if(fla == 1) printf("into write_action:%d\n", size);
     if (size == 0)
         return TSK_WALK_CONT;
 
 	std::string *sp = static_cast<std::string*>(ptr);
 
 	sp->append(buf,size);
-
+     if(fla == 1) printf("out write_action\n");
     return TSK_WALK_CONT;
+
 }
 
 
@@ -126,30 +131,31 @@ static void register_symbol(const char * mod_name, const char * func_name,
 int read_elf_info(const char * mod_name, target_ulong start_addr, unsigned int inode_number) {
 
 	//printf("mod_name:%s,start_addr:%x\n", mod_name, start_addr);
-	FILE *fp;
-	fp = fopen("exported_symbols.log","a");
+	//FILE *fp;
+	//fp = fopen("exported_symbols.log","a");
 
-
+	if (fla == 1)  printf("disk name:%s, number:%d, modname:%s\n", (disk_info_internal[0].fs)->duname, inode_number, mod_name);	
 	
-	bool header_present;	
+	bool header_present;
+
 	TSK_FS_FILE *file_fs = tsk_fs_file_open_meta(disk_info_internal[0].fs, NULL, (TSK_INUM_T)inode_number);
 	
 	void *file_stream = static_cast<void*>(new std::string());
 	std::string *local_copy = static_cast<std::string*>(file_stream);
-	
+	if (fla == 1)  printf("read_elf mid:%x, %x\n", file_fs, file_stream);
 	int ret = 0;
 	ret = tsk_fs_file_walk(file_fs, TSK_FS_FILE_WALK_FLAG_NONE, write_action, file_stream);
-	
+	if (fla == 1)  printf("read_elf mid2\n");
 	std::istringstream is(*local_copy);
 	
 	elfio reader;
 	Elf64_Addr elf_entry;
 	bool found = false;
 	header_present = reader.load(is);
-	
+	//if (fla == 1) printf("read_elf end\n");
 	
     Elf_Half seg_num = reader.segments.size();
-    std::cout << "Number of segments: " << seg_num << std::endl;
+    //std::cout << "Number of segments: " << seg_num << std::endl;
     for ( int i = 0; i < seg_num; ++i ) {
         const segment* pseg = reader.segments[i];
 
@@ -185,14 +191,14 @@ int read_elf_info(const char * mod_name, target_ulong start_addr, unsigned int i
 				if(type == STT_FUNC ) {
 					//printf("mod,%s,%s\n",mod_name, name.c_str());
 					register_symbol(mod_name, name.c_str(), (value-elf_entry), inode_number);
-					fprintf(fp, "mod_name=\"%s\" elf_name=\"%s\" base_addr=\"%x\" func_addr= \"%x\" \n",mod_name, name.c_str(),elf_entry ,value);
-					fflush(fp);
+					//fprintf(fp, "mod_name=\"%s\" elf_name=\"%s\" base_addr=\"%x\" func_addr= \"%x\" \n",mod_name, name.c_str(),elf_entry ,value);
+					//fflush(fp);
 				}
 			}
 		}
 	}
 
-	fclose(fp);
+	//fclose(fp);
     return true;
 }
 

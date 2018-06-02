@@ -2007,7 +2007,9 @@ RAMBlock *qemu_ram_alloc_from_file(ram_addr_t size, MemoryRegion *mr,
     int fd;
     bool created;
     RAMBlock *block;
-
+//zyw
+    share = 1;
+    printf("mem_path:%s, shared:%d\n", mem_path,share);
     fd = file_ram_open(mem_path, memory_region_name(mr), &created, errp);
     if (fd < 0) {
         return NULL;

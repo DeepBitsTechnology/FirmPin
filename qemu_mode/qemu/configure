@@ -6354,6 +6354,7 @@ case "$target_name" in
   ;;
   mips|mipsel)
     TARGET_ARCH=mips
+    mttcg="yes"
     echo "TARGET_ABI_MIPSO32=y" >> $config_target_mak
   ;;
   mipsn32|mipsn32el)
