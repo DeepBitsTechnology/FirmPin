@@ -74,7 +74,50 @@ int helper_flag = 0;
 int xxx = 0;
 int helper_ASID[2];
 
+#define FORKSRV_FD 198
+#define TSL_FD (FORKSRV_FD - 1)
 
+intptr_t addr_trans_table[CPU_TLB_SIZE];
+uint32_t httpd_pgd = 0;
+int pgd_changed = 0;
+
+
+struct tlb_item{
+  int index;
+  intptr_t addend;
+};
+
+void afl_wait_tlb(int fd) {
+
+  struct tlb_item t;
+  while (1) {
+
+    /* Broken pipe means it's time to return to the fork server routine. */
+
+    if (read(fd, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
+      break;
+    int index = t.index;
+    intptr_t addend = t.addend;
+    addr_trans_table[index] = addend;
+
+  }
+
+  close(fd);
+
+}
+
+static void afl_request_tlb(int index, intptr_t addend)
+{
+  struct tlb_item t;
+
+  t.index = index;
+  t.addend = addend;
+  if (write(TSL_FD, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
+    return;
+
+}
+
+//
 
 QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
 
@@ -647,6 +690,14 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
     } else {
         /* TLB_MMIO for rom/romd handled below */
         addend = (uintptr_t)memory_region_get_ram_ptr(section->mr) + xlat;
+
+//zyw
+        target_ulong pgd = DECAF_getPGD(cpu);
+	if(pgd == httpd_pgd && vaddr < 0x80000000) { 
+		DECAF_printf("%x:%x\n",vaddr & 0xfffff000,addend); 
+	}
+//
+
     }
 
     code_address = address;
@@ -917,51 +968,6 @@ int write_mapping()
 
 
 
-//zyw
-#define FORKSRV_FD 198
-#define TSL_FD (FORKSRV_FD - 1)
-
-intptr_t addr_trans_table[CPU_TLB_SIZE];
-uint32_t httpd_pgd = 0;
-int pgd_changed = 0;
-
-
-struct tlb_item{
-  int index;
-  intptr_t addend;
-};
-
-void afl_wait_tlb(int fd) {
-
-  struct tlb_item t;
-  while (1) {
-
-    /* Broken pipe means it's time to return to the fork server routine. */
-
-    if (read(fd, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
-      break;
-    int index = t.index;
-    intptr_t addend = t.addend;
-    addr_trans_table[index] = addend;
-
-  }
-
-  close(fd);
-
-}
-
-static void afl_request_tlb(int index, intptr_t addend)
-{
-  struct tlb_item t;
-
-  t.index = index;
-  t.addend = addend;
-  if (write(TSL_FD, &t, sizeof(struct tlb_item)) != sizeof(struct tlb_item))
-    return;
-
-}
-
-//
 
 
 
@@ -1048,7 +1054,7 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
 
     if(pgd == httpd_pgd && addr_trans_table[index] == 0 && addr < 0x80000000) {
 	//DECAF_printf("http_pgd:%x, tlb add %x, %x,%x,%x,%x\n", pgd, index, addr & 0xfffff000, addr, env->tlb_table[mmu_idx][index].addend, p); 
-	DECAF_printf("%x:%x\n",addr & 0xfffff000, (uintptr_t)(addr & 0xfffff000) + env->tlb_table[mmu_idx][index].addend); 
+	//DECAF_printf("%x:%x\n",addr & 0xfffff000, (uintptr_t)(addr & 0xfffff000) + env->tlb_table[mmu_idx][index].addend); 
 	addr_trans_table[index] = env->tlb_table[mmu_idx][index].addend;// current tlb_table in child process need to be updated. 
 	afl_request_tlb(index, env->tlb_table[mmu_idx][index].addend);// tlb_table in parent process need to be updated.
     }

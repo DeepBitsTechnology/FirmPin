@@ -220,6 +220,7 @@ void stopWork(){
 
 
 //int do_block_begin_flag = 0;
+int first_time = 1;
 int after = 0;
 extern int fcntl_start;
 
@@ -284,7 +285,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 	}
 	do_block_begin_flag ++;
 */
-
+	
 	helper_ASID[index] = cpu->CP0_EntryHi & cpu->CP0_EntryHi_ASID_mask; //zyw
 	//if(pc < 0x70000000 && after == 1){ DECAF_printf("pc:%x, cur_proc:%s, pgd:%x\n", pc, cur_process, pgd); }//after = 0;}
 
@@ -301,6 +302,17 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		//DECAF_printf("ra is %x\n", ra);
 	}
 */
+
+	if(pc < 0x80000000 && first_time){
+		//DECAF_printf("pc:%x,sp:%x,gp:%x, fp:%x, ra:%x\n", pc, cpu->active_tc.gpr[29], cpu->active_tc.gpr[28], cpu->active_tc.gpr[30], cpu->active_tc.gpr[31]);
+		FILE * fp = fopen("/home/zyw/tmp/afl_user_mode/image/mapping_table", "a+");
+		for(int i=0;i<32;i++) {
+			fprintf(fp, "%x\n", cpu->active_tc.gpr[i]);
+		}
+		fprintf(fp, "%x\n", cpu->active_tc.PC);
+		fclose(fp);
+		first_time = 0;
+	}
 
 	if(pc == 0x407e1c){
 		target_ulong s0 = cpu->active_tc.gpr[16];//s0
