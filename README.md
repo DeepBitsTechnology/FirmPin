@@ -9,15 +9,17 @@
 		Here, we test DIR-815_FIRMWARE_1.01.ZIP, a router firmware image based on mipsel cpu arch.
 		Finally, we replace the run.sh in scratch/(num)/ with our modified one (In firmadyne_dev dir).
 
-####TriforceAFL: AFL fuzzing with full-system emulation
-		Run make
-  
 ####DECAF: upgraded to the newest qemu version 2.10.1
 		It is included in qemu_mode/qemu dir. 
 		If there is something wrong with sleuthkit, plese comment or not comment the following code in configure and recompile it.
 			LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make
+
+####TriforceAFL: AFL fuzzing with full-system emulation
+		Run make
+  
+
 
 ####Usage:
 		cd firmadyne
