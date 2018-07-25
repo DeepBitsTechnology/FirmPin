@@ -48,7 +48,6 @@ IMAGE_DIR=`get_fs_mount ${IID}`
 CONSOLE=`get_console ${ARCH}`
 LIBNVRAM=`get_nvram ${ARCH}`
 
-DEVICE=`get_device`
 
 echo "----Copying Filesystem Tarball----"
 mkdir -p "${WORK_DIR}"
@@ -104,7 +103,7 @@ echo "----Patching Filesystem (chroot)----"
 cp $(which busybox) "${IMAGE_DIR}"
 cp "${SCRIPT_DIR}/fixImage.sh" "${IMAGE_DIR}"
 cp  -a "${FIRMWARE_DIR}/../FILE_LOAD/." "${IMAGE_DIR}/FILE_LOAD/" ##D-link router
-mv "${IMAGE_DIR}/FILE_LOAD/wifi.php" "${IMAGE_DIR}/etc/services/WIFI/wifi.php" ##D-link router
+#mv "${IMAGE_DIR}/FILE_LOAD/wifi.php" "${IMAGE_DIR}/etc/services/WIFI/wifi.php" ##D-link router
 chroot "${IMAGE_DIR}" /busybox ash /fixImage.sh
 rm "${IMAGE_DIR}/fixImage.sh"
 rm "${IMAGE_DIR}/busybox"
