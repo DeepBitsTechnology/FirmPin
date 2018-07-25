@@ -11,8 +11,6 @@
 
 ####DECAF: upgraded to the newest qemu version 2.10.1
 		It is included in qemu_mode/qemu dir. 
-		If there is something wrong with sleuthkit, plese comment or not comment the following code in configure and recompile it.
-			LIBS="\$(SRC_PATH)/shared/sleuthkit/lib/libtsk.a -lbfd $LIBS
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make
 
@@ -23,12 +21,18 @@
 
 ####Usage:
 		cd firmadyne
-		Run ./scratch/(num)/run.sh 
+		Run ./scratch/(num)/run.sh (first replace it with ../firmadyne_dev/run.sh)
 		In another terminal, run 'telnet 127.0.0.1 4444', into qemu monitor console.
-		Load plugin, such as'../qemu_mode/qemu/plugins/callbacktests/callbacktests.so', 'do_callbacktests httpd'
-		When firmware system initialization is completed, open a Browser, type a request in url. 		
-			like "http://192.168.0.1/hedwig.cgi"
-		Finally, fuzz process is started.
+		FirmFuzzer plugin:
+			load_plugin ../qemu_mode/qemu/plugins/callbacktests/callbacktests.so
+			do_callbacktests httpd
+			do_callbacktests hedwig.cgi
+			When firmware system initialization is completed and poll system call is executed, open a Browser, type a request "192.168.0.1/hedwig.cgi" in url, the fuzz process will be started.
+		MalScalpel plugin:
+			load_plugin ../qemu_mode/qemu/plugins/unpacker/unpacker.so
+			trace_by_name mirai.mpsl
+			Then, telnet into system "telnet 192.168.0.1" with username Alphanetworks and password wrgnd08_dlob_dir815
+			Run "/FILE_LOAD/mirai.mpsl", the plugin works.
 
 
 
