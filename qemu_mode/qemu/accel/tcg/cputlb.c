@@ -692,10 +692,12 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
         addend = (uintptr_t)memory_region_get_ram_ptr(section->mr) + xlat;
 
 //zyw
+/*
         target_ulong pgd = DECAF_getPGD(cpu);
 	if(pgd == httpd_pgd && vaddr < 0x80000000) { 
 		DECAF_printf("%x:%x\n",vaddr & 0xfffff000,addend); 
 	}
+*/
 //
 
     }
@@ -975,11 +977,11 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
 {
 
 //zyw
-
+/*
     MIPSCPU *mips_cpu = mips_env_get_cpu(env);
     CPUState *cs = CPU(mips_cpu);
     target_ulong pgd = DECAF_getPGD(cs);
-
+*/
 //
     int mmu_idx, index, pd;
     void *p;
@@ -999,12 +1001,13 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
 	pgd_changed = 0;
     }
 
+/*
     if(pgd == httpd_pgd && addr_trans_table[index] !=  0 && addr < 0x80000000) { 
 	p = (void *)((uintptr_t)addr +  addr_trans_table[index]); 
 	//DECAF_printf("addr is %d, %x,%x\n",index, addr, addr_trans_table[index]); 
 	return qemu_ram_addr_from_host_nofail(p);
     }
-
+*/
 //
 
     //if(helper_flag == 1 && addr < 0x70000000) printf("page_bit:%d,CPU_TLB_SIZE:%d\n", TARGET_PAGE_BITS, CPU_TLB_SIZE);
@@ -1051,7 +1054,7 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
     //if(helper_flag == 1 && addr < 0x70000000 && xxx ==1){ DECAF_printf("index:%d, ASID:%d,addr:%x,mmu_idx:%d,index:%d,addend:%x,p:%x\n",ind,ASID, addr, mmu_idx, index, env->tlb_table[mmu_idx][index].addend, p); xxx = 0;}
 */
 //zyw
-
+/*
     if(pgd == httpd_pgd && addr_trans_table[index] == 0 && addr < 0x80000000) {
 	//DECAF_printf("http_pgd:%x, tlb add %x, %x,%x,%x,%x\n", pgd, index, addr & 0xfffff000, addr, env->tlb_table[mmu_idx][index].addend, p); 
 	//DECAF_printf("%x:%x\n",addr & 0xfffff000, (uintptr_t)(addr & 0xfffff000) + env->tlb_table[mmu_idx][index].addend); 
@@ -1063,7 +1066,7 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env, target_ulong addr)
 		DECAF_printf("not the same %d, %x, %x,%x\n", index, addr, addr_trans_table[index], env->tlb_table[mmu_idx][index].addend);	
 	}	
     }
-
+*/
 //
     return qemu_ram_addr_from_host_nofail(p);
 }
