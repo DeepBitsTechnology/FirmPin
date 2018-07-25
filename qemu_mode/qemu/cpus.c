@@ -1530,12 +1530,9 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
    // while (1) { //zyw
     while (!afl_wants_cpu_to_stop) {
 	CPUArchState * env = (CPUArchState *)cpu->env_ptr;
-	if(flagg ==2) DECAF_printf("loop2.5, pc:%x\n", env->active_tc.PC);
         if (cpu_can_run(cpu)) {
             int r;
-	    if(flagg ==2) DECAF_printf("loop2.6\n");
             r = tcg_cpu_exec(cpu);
-	    if(flagg ==2) DECAF_printf("loop2.7 r is %x\n", r);
             switch (r) {
             case EXCP_DEBUG:
                 cpu_handle_guest_debug(cpu);
@@ -1558,7 +1555,6 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
                 /* Ignore everything else? */
                 break;
             }
-	    if(flagg == 2) DECAF_printf("loop2.8, ret:%x\n",r);
         } else if (cpu->unplug) {
             qemu_tcg_destroy_vcpu(cpu);
             cpu->created = false;
@@ -1566,11 +1562,8 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
             qemu_mutex_unlock_iothread();
             return NULL;
         }
-	if(flagg ==2) DECAF_printf("loop2.85\n");
         atomic_mb_set(&cpu->exit_request, 0);
-	if(flagg ==2) DECAF_printf("loop2.9\n");
         qemu_tcg_wait_io_event(cpu ? cpu : QTAILQ_FIRST(&cpus));
-	if(flagg ==2) DECAF_printf("loop2.95\n");
     }
 //zyw
 
@@ -1939,8 +1932,7 @@ char * trim(char *str)
 
 
 
-//zyw
-/*
+
 static void
 gotPipeNotification(void *ctx)
 {//first stopvm
@@ -1968,7 +1960,7 @@ gotPipeNotification(void *ctx)
     }else if(strcmp(buf, "END") == 0){
 	print_start = 0;
 //record the path pc
-
+/*
 	char filename[1000];
 	char * rootdir = "/home/zyw/experiment/TriforceAFL_new/tmp/";
 	char * orig_data_trim = trim(orig_data);
@@ -1986,7 +1978,7 @@ gotPipeNotification(void *ctx)
 		fprintf(fp, "%x\n", print_pc[i]);
 	}
 	fclose(fp);
-
+*/
 //
 	print_index = 0;
 	DECAF_printf("afl stop snapshot\n");
@@ -2006,7 +1998,7 @@ gotPipeNotification(void *ctx)
 
 
 }
-*/
+
 
 /*
     // we're now in the child!
@@ -2031,6 +2023,8 @@ int user_forkpt;
 int user_stack[1000];
 //int kenerl[0x10000000];
 
+//zyw
+/*
 static void
 gotPipeNotification(void *ctx)
 {
@@ -2058,7 +2052,7 @@ gotPipeNotification(void *ctx)
     qemu_account_warp_timer();
     //qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
 }
-
+*/
 
 //zyw
 

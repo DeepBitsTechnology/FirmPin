@@ -416,24 +416,24 @@ static void unpacker_module_loaded(VMI_Callback_Params *pcp)
 static void unpacker_mem_write(DECAF_Callback_Params*dcp)
 {
 
-	// DECAF change
-	uint32_t virt_addr;//,phys_addr;
+	uint32_t virt_addr,phys_addr;
 	int size;
-	//phys_addr=dcp->mw.phy_addr;
+	phys_addr=dcp->mw.paddr;
 	virt_addr=dcp->mw.vaddr;
 	size=dcp->mw.dt;
-	//end
-	//DECAF_printf("write virtual addr:%x\n", virt_addr);
+
+	
 
 	if(inContext) {
 		memory_write = 1;
+		//DECAF_printf("write addr:%lx,%lx\n", virt_addr, phys_addr);
 		set_mem_mark(virt_addr,size,(1<<size)-1);
 	} else {
 	//clean memory 
 		//taintcheck_clean_memory(phys_addr, size);  //Need change for DECAF
 		set_mem_mark(virt_addr,size,0);
 	}
-/*	END	*/
+
 }
 void unregister_callbacks()
 {
@@ -547,7 +547,7 @@ plugin_interface_t * init_plugin()
 //syscall parser
 	xmlDoc *document;
 	xmlNode *root, *first_child, *node;
-	char *filename = "syscall.xml";
+	char *filename = "../qemu_mode/qemu/plugins/unpacker/syscall.xml";
 	document = xmlReadFile(filename, NULL, 0);
 	root = xmlDocGetRootElement(document);
 	first_child = root->children;

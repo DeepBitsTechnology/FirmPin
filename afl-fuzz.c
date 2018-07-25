@@ -1905,8 +1905,8 @@ EXP_ST void init_forkserver(char** argv) {
 
     setsid();
 
-    dup2(dev_null_fd, 1);
-    dup2(dev_null_fd, 2);
+    //dup2(dev_null_fd, 1);
+    //dup2(dev_null_fd, 2);
 
     if (out_file) {
 
@@ -2185,8 +2185,8 @@ static u8 run_target(char** argv) {
 
       setsid();
 
-      dup2(dev_null_fd, 1);
-      dup2(dev_null_fd, 2);
+      //dup2(dev_null_fd, 1);
+      //dup2(dev_null_fd, 2);
 
       if (out_file) {
 

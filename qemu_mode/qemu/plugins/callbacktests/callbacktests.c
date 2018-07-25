@@ -215,23 +215,15 @@ void stopWork(){
 	afl_fork = 0;
 	targetpid[1]=0;
 	targetcr3[1]=0;	
-	//endWork(0);
+	endWork(0);
 }
 
-
-//int do_block_begin_flag = 0;
 int first_time = 1;
 int after = 0;
-extern int fcntl_start;
 
 static void do_block_begin(DECAF_Callback_Params* param)
 {
-/*
-	if(param->bb.tb->pc == 	0x805510f0){ //egrep ' (panic|log_store)$' /proc/kallsyms
-		DECAF_printf("kernel panic\n");
-		doneWork(32);
-	}
-*/
+
 	CPUArchState *cpu = param->bb.env->env_ptr;
 	target_ulong pc = param->bb.tb->pc;
 	target_ulong pgd = DECAF_getPGD(param->bb.env);
@@ -256,64 +248,15 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		index = target_exist(cur_process); //sometimes the pgd of child program is the same as parent program. need to recalculate the index
 		if(index == -1) return; // cur_process is null, pid is 0
 	}
-	//DECAF_printf("%s:%d:block begin:%x,pgd:%x\n", cur_process, pid, pc, pgd);
-/*
-	if(do_block_begin_flag%100 == 0)
-	{
-		//DECAF_printf("cr is %x,pid is %d\n",pgd, pid);
-		for (int i = 0; i < cpu->tlb->tlb_in_use; i++) {
-			r4k_tlb_t *tlb = &cpu->tlb->mmu.r4k.tlb[i];
-			target_ulong mask = tlb->PageMask | ~(TARGET_PAGE_MASK << 1);
-			target_ulong VPN = tlb->VPN & ~mask;
-			int n = !!(0x404a4c & mask & ~(mask >> 1));//n=0?
-			target_ulong physical = tlb->PFN[n] | (0x404a4c & (mask >> 1));
-			//DECAF_printf("callbacktest virtual:%x,physical:%x,n:%d\n", VPN, physical,n);
 
-		}
-		for(int i =0; i < 256; i++){
-			//int addr = VPN;			
-			int mmu_idx = 2;
-			//int index = (addr >> 12) & (256 - 1);
-			//haddr = addr + cpu->tlb_table[mmu_idx][index].addend;]
-			if(cpu->tlb_table[mmu_idx][i].addend != -1){
-				//DECAF_printf("addend is %x\n", cpu->tlb_table[mmu_idx][i].addend);
-			}
-		}		
-		//DECAF_printf("\n\n");
-
-
-	}
-	do_block_begin_flag ++;
-*/
 	
 	helper_ASID[index] = cpu->CP0_EntryHi & cpu->CP0_EntryHi_ASID_mask; //zyw
-	//if(pc < 0x70000000 && after == 1){ DECAF_printf("pc:%x, cur_proc:%s, pgd:%x\n", pc, cur_process, pgd); }//after = 0;}
-
+	
 	char modname[512];
 	char functionname[512];
 
-//tmporary, after read stop and reload snapshot
-/*
-	if(pc == 0x406d6c){
-		target_ulong sp = cpu->active_tc.gpr[29];//sp
-		target_ulong ra_addr = sp + 0x16c;
-		target_ulong ra;
-		DECAF_read_mem(param->bb.env, ra_addr, sizeof(ra), &ra);
-		//DECAF_printf("ra is %x\n", ra);
-	}
-*/
-
-	if(pc < 0x80000000 && first_time){
-		//DECAF_printf("pc:%x,sp:%x,gp:%x, fp:%x, ra:%x\n", pc, cpu->active_tc.gpr[29], cpu->active_tc.gpr[28], cpu->active_tc.gpr[30], cpu->active_tc.gpr[31]);
-		FILE * fp = fopen("/home/zyw/tmp/afl_user_mode/image/mapping_table", "a+");
-		for(int i=0;i<32;i++) {
-			fprintf(fp, "%x\n", cpu->active_tc.gpr[i]);
-		}
-		fprintf(fp, "%x\n", cpu->active_tc.PC);
-		fclose(fp);
-		first_time = 0;
-	}
-
+	
+	//if(pc < 0x70000000) DECAF_printf("pc is %x\n", pc);
 	if(pc == 0x407e1c){
 		target_ulong s0 = cpu->active_tc.gpr[16];//s0
 		DECAF_printf("s0s0s0s0 is %x\n", s0);
@@ -323,31 +266,9 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		target_ulong v0 = cpu->active_tc.gpr[2];//s0
 		DECAF_printf("v0v0v0 is %x\n", v0);
 	} 
-	if(pc == 0x407348 && after == 1){ //NEED CHANGE  0x407bf0
+	if(pc == 0x407348 && after == 1){
 
 		DECAF_printf("after read\n");
-/*
-		//user_forkpt = cpu->active_tc.gpr[29];//sp
-		DECAF_printf("donestate restart_cpu:%x, user_forkpt:%x, user_stack:%x, len:%d\n",param->bb.env, user_forkpt, user_stack, user_origpt-user_forkpt);
-		if(user_origpt-user_forkpt < 0) exit(32);
-		cpu_memory_rw_debug(param->bb.env, user_forkpt, user_stack, user_origpt-user_forkpt, 0);
-		DECAF_printf("sp:%x\n",cpu->active_tc.gpr[29]);
-		for(int i=0;i<1000;i++)
-		{
-			if(user_stack[i]!=0){
-				printf("%x ",user_stack[i]);
-			}
-		 }
-*/
-		//loadCPUState(cpu);
-		doneWork(0);
-		//return;
-/*	
-		stopTrace();
-		//DECAF_printf("%s doneWork\n", procname);	
-		//doneWork(0);
-		afl_fork = 0;
-		//network_read_block = 1; //change before/after create snapshot.
 
 		targetpid[1]=0;
 		targetcr3[1]=0;		
@@ -355,24 +276,12 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		struct itimerval tick;
 		memset(&tick, 0, sizeof(tick));    
 		tick.it_value.tv_sec = 0;  // sec  
-		tick.it_value.tv_usec = 0; // micro sec
+		tick.it_value.tv_usec = 300; // micro sec
 		int ret = setitimer(ITIMER_REAL, &tick, NULL);  
 		if(ret) DECAF_printf("cancel timer failed\n");
-		//doneWork(0);//NEED CHANGE
-		DECAF_printf("hedwig end work\n");
-		endWork(0);
-*/	
+	
 	}
-//
 
-/*
-	if(pc == 0x40a41c || pc == 0x40a42c)
-		return;
-	if(pc == 0x404ac8)
-		DECAF_printf("v0 is %x\n", cpu->active_tc.gpr[2]);
-*/
-	//if(pc < 0x70000000)
-		//DECAF_printf("callbacktest pc is %x, s3 is %x\n", pc, cpu->active_tc.gpr[19]);
 		
 //binary modification to improve fuzzing speed	
 	if(strcmp(cur_process, "hedwig.cgi") == 0) 
@@ -399,10 +308,14 @@ static void do_block_begin(DECAF_Callback_Params* param)
 	if (0 == funcmap_get_name_c(pc, pgd, &modname, &functionname)) {
 		if(strstr(functionname, "_dl")!=NULL)
 			return;
-		//if(after == 1) DECAF_printf("functiona %s\n", functionname);
-		if(strcmp(functionname, "fopen") == 0)
+		//DECAF_printf("function:%s\n", functionname);
+		if(strcmp(functionname, "__libc_open") == 0 )
 		{
-			
+			target_ulong a0 = cpu->active_tc.gpr[4];//fd
+			char tmpBuf[50];
+			memset(tmpBuf, 0, 50);
+			DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);
+			DECAF_printf("%s, %s,%s,%x\n", cur_process,functionname, tmpBuf, pc);
 		}
 		else if(strcmp(functionname, "getaddrinfo") == 0 || strcmp(functionname, "_getaddrinfo") == 0)
 		{	
@@ -428,9 +341,7 @@ static void do_block_begin(DECAF_Callback_Params* param)
 			DECAF_read_mem(param->bb.env, a0, 50, tmpBuf);
 			DECAF_printf("%s, execv,%s,%x\n", cur_process, tmpBuf, pc);
 			return;
-
-
-			
+		
 		}
 
 		else if(strcmp(functionname, "poll") == 0)
@@ -443,7 +354,6 @@ static void do_block_begin(DECAF_Callback_Params* param)
 		{
 			target_ulong a0 = cpu->active_tc.gpr[4];//fd
 			target_ulong a2 = cpu->active_tc.gpr[6];//nbytes
-			//DECAF_printf("cur_pro:%s, a0:%x, current_fd:%x, pc:%x\n",cur_process, a0, current_fd, pc);	
 			if(a0 == current_fd){
 				network_read_block = 1;
 			}
@@ -463,16 +373,6 @@ static void do_block_begin(DECAF_Callback_Params* param)
 			int ret = setitimer(ITIMER_REAL, &tick, NULL);  
 			if(ret) DECAF_printf("cancel timer failed\n");
 			DECAF_printf("sleep end work\n\n");
-			//doneWork(0); //need change
-			//endWork(0);
-		}
-		else if(strcmp(functionname, "__libc_fcntl") == 0)
-		{
-			fcntl_start = 1;
-			target_ulong a0 = cpu->active_tc.gpr[4];//fd
-			int tmpBuf;
-			DECAF_read_mem(param->bb.env, a0, 4, &tmpBuf);
-			DECAF_printf("%s, %s,%x,%x\n", cur_process,functionname, tmpBuf, pc);
 		}
 	}
 	
@@ -505,10 +405,10 @@ static void do_block_begin(DECAF_Callback_Params* param)
 			after = 1;
 //NEED CHANGE			
 				
-			startForkserver(cpu, enableTimer);
+			//startForkserver(cpu, enableTimer);
 			//startFork(cpu, enableTimer);
-			//startCreatesnapshot(cpu, enableTimer);
-			//storeCPUState(cpu); 
+			startCreatesnapshot(cpu, enableTimer);
+			storeCPUState(cpu); 
 			
 		}
 	}
@@ -775,8 +675,7 @@ static void callbacktests_removeproc_callback(VMI_Callback_Params* params)
 			int ret = setitimer(ITIMER_REAL, &tick, NULL);  
 			if(ret) DECAF_printf("cancel timer failed\n");
 			DECAF_printf("hedwig end work\n");
-			//endWork(0);
-			doneWork(0);//NEED CHANGE
+			endWork(0);//NEED CHANGE
 		}
 	}
 

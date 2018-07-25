@@ -111,10 +111,11 @@ static void REGPARM ld_cb(unsigned long addr, gva_t vaddr) {
     helper_DECAF_invoke_mem_read_callback(vaddr,qemu_ram_addr_from_host((void *)(addr)), *(uint8_t *) addr, 1);  
 }
 
-static void REGPARM st_cb(unsigned long addr, gva_t vaddr,unsigned long value) {
+static void REGPARM st_cb(gva_t vaddr, unsigned long addr ,unsigned long value) {
 //fprintf(stderr, "stb_cb: %08x %08x\n", addr, vaddr);
   if(DECAF_is_callback_needed(DECAF_MEM_WRITE_CB))
-    helper_DECAF_invoke_mem_write_callback(vaddr,qemu_ram_addr_from_host((void *)(addr)),value & 0xFF,1);
+    //helper_DECAF_invoke_mem_write_callback(vaddr,qemu_ram_addr_from_host((void *)(addr)),value & 0xFF,1);
+    helper_DECAF_invoke_mem_write_callback(vaddr,qemu_ram_addr_from_host((void *)(addr)),value,1);
 }
 //zyw end
 
@@ -1873,15 +1874,19 @@ static void tcg_out_qemu_st(TCGContext *s, const TCGArg *args, bool is64)
     //tcg_out_pop(s, args[addrlo]);
 
     tcg_out_push(s, datalo);
-    tcg_out_push(s, datahi);
     tcg_out_push(s, tcg_target_call_iarg_regs[0]);
     tcg_out_push(s, tcg_target_call_iarg_regs[1]);
-    tcg_out_mov(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[1], args[addrlo]);
-    tcg_out_mov(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[2], args[0]);
+    tcg_out_push(s, tcg_target_call_iarg_regs[2]);
+
+    //tcg_out_mov(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[1], addrlo);	//paddr
+    tcg_out_mov(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[0], addrlo); //vaddr
+    tcg_out_mov(s, TCG_TYPE_I32, tcg_target_call_iarg_regs[2], datalo);//value
+     
     tcg_out_call(s, (tcg_target_long)st_cb);
+
+    tcg_out_pop(s, tcg_target_call_iarg_regs[2]);
     tcg_out_pop(s, tcg_target_call_iarg_regs[1]);
     tcg_out_pop(s, tcg_target_call_iarg_regs[0]);
-    tcg_out_pop(s, datahi);
     tcg_out_pop(s, datalo);
 
 

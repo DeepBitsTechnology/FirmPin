@@ -591,7 +591,6 @@ static target_ulong startForkserver(CPUArchState *env, target_ulong enableTicks)
     aflEnableTicks = enableTicks; //zyw
     afl_wants_cpu_to_stop = 1;
     print_start = 1;
-    //set_afl_wants_cpu_to_stop();
    
 #endif
     return 0;

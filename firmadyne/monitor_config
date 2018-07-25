@@ -5,8 +5,8 @@ do_callbacktests hedwig.cgi
 do_callbacktests single_httpd_sa
 
 
-
-
+load_plugin ../qemu_mode/qemu/plugins/unpacker/unpacker.so
+ trace_by_name mirai.mpsl
 
 do_callbacktests httpd_sample
 do_callbacktests execv_sample
