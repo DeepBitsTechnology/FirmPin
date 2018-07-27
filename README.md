@@ -1,4 +1,4 @@
-###TriforceAFL_new
+###FirmPin###
 
 		A tool for simulation, dynamic analysis and fuzzing of IoT firmware.
 		Combination of TriforceAFL, firmadyne and DECAF.
