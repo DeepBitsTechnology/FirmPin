@@ -1,11 +1,13 @@
- ### FirmPin
+ ## FirmPin
 
  	A tool for simulation, dynamic analysis and fuzzing of IoT firmware. 
- 	Combination of TriforceAFL, firmadyne and DECAF.
+ Combination of [TriforceAFL](https://github.com/nccgroup/TriforceAFL), [firmadyne](https://github.com/firmadyne/firmadyne) and [DECAF](https://github.com/sycurelab/DECAF).
  
  It is a Pintool-like framework,  and provides the instrumentation at basic block level,  system call level and memory access level for both user level and kernel level programs.  
 
+## Build
 ### DECAF: upgraded to the newest qemu version 2.10.1
+ [DECAF](https://github.com/sycurelab/DECAF) 
 		It is included in qemu_mode/qemu dir. 
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make
