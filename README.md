@@ -6,8 +6,9 @@
  It is a Pintool-like framework,  and provides the instrumentation at basic block level,  system call level and memory access level for both user level and kernel level programs.  
 
 ## Build
-### DECAF: upgraded to the newest qemu version 2.10.1
- [DECAF](https://github.com/sycurelab/DECAF) 
+Tested on Ubuntu 16.04
+### DECAF: 
+ [DECAF](https://github.com/sycurelab/DECAF)  
 		It is included in qemu_mode/qemu dir. 
 		In our case, run ./configure --target-list=mipsel-softmmu
 		Run make
