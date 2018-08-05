@@ -41,6 +41,10 @@ Tested on Ubuntu 16.04
 			trace_by_name mirai.mpsl
 			Then, telnet into system "telnet 192.168.0.1" with username "Alphanetworks" and password "wrgnd08_dlob_dir815"
 			Run "/FILE_LOAD/mirai.mpsl", the plugin works.
+			
+# Plugin Development
+
+please see [wiki](https://github.com/DeepBitsTechnology/FirmPin/wiki) for details.
 
 
 
