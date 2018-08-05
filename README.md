@@ -1,3 +1,7 @@
+
+[![Black Hat Arsenal](https://raw.githubusercontent.com/toolswatch/badges/master/arsenal/usa/2018.svg)](http://www.toolswatch.org/2018/05/black-hat-arsenal-usa-2018-the-w0w-lineup/)
+
+
  ## FirmPin
 
  	A tool for simulation, dynamic analysis and fuzzing of IoT firmware. 
