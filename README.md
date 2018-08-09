@@ -39,7 +39,9 @@ Tested on Ubuntu 16.04
 			load_plugin ../qemu_mode/qemu/plugins/callbacktests/callbacktests.so
 			do_callbacktests httpd
 			do_callbacktests hedwig.cgi
-			When firmware system initialization is completed and poll system call is executed, open a Browser, type a request "192.168.0.1/hedwig.cgi" in url, the fuzz process will be started.
+			When firmware system initialization is completed and poll system call is executed, 
+			open a Browser, type a request "192.168.0.1/hedwig.cgi" in url, 
+			the fuzz process will be started.
 		MalScalpel plugin:
 			load_plugin ../qemu_mode/qemu/plugins/unpacker/unpacker.so
 			trace_by_name mirai.mpsl
